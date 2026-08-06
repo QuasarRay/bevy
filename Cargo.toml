@@ -46,6 +46,8 @@ members = [
 exclude = [
   # Integration tests are not part of the workspace
   "tests-integration",
+  # Jackdaw is integrated at the Git-repository level and remains its own workspace.
+  "editor/jackdaw",
 ]
 
 [workspace.lints.clippy]

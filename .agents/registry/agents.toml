@@ -1,0 +1,76 @@
+[[agent]]
+slug = "explorer"
+name = "seqmax_explorer"
+description = "Read-only repository mapper for exact entry points, dependencies, and evidence before decisions."
+sandbox_mode = "read-only"
+role = "roles/explorer.md"
+
+[[agent]]
+slug = "researcher"
+name = "seqmax_researcher"
+description = "Read-only primary-source researcher for current versioned external facts."
+sandbox_mode = "read-only"
+role = "roles/researcher.md"
+
+[[agent]]
+slug = "architect"
+name = "seqmax_architect"
+description = "Read-only architect that chooses one evidence-backed design before broad edits."
+sandbox_mode = "read-only"
+role = "roles/architect.md"
+
+[[agent]]
+slug = "implementer"
+name = "seqmax_implementer"
+description = "Write-capable worker for one approved bounded implementation and focused validation."
+sandbox_mode = "workspace-write"
+role = "roles/implementer.md"
+
+[[agent]]
+slug = "diagnostician"
+name = "seqmax_diagnostician"
+description = "Read-only root-cause analyst for a concrete reproduced failure."
+sandbox_mode = "read-only"
+role = "roles/diagnostician.md"
+
+[[agent]]
+slug = "test-engineer"
+name = "seqmax_test_engineer"
+description = "Write-capable test specialist for a focused proving test matrix when test design is difficult."
+sandbox_mode = "workspace-write"
+role = "roles/test-engineer.md"
+
+[[agent]]
+slug = "migration-analyst"
+name = "seqmax_migration_analyst"
+description = "Read-only migration analyst for compatibility inventory, ordering, residue checks, and rollback."
+sandbox_mode = "read-only"
+role = "roles/migration-analyst.md"
+
+[[agent]]
+slug = "adversarial-reviewer"
+name = "seqmax_adversarial_reviewer"
+description = "Read-only adversarial reviewer for correctness, regressions, requirement gaps, and weak evidence."
+sandbox_mode = "read-only"
+role = "roles/adversarial-reviewer.md"
+
+[[agent]]
+slug = "security-reviewer"
+name = "seqmax_security_reviewer"
+description = "Read-only specialist for justified security, unsafe-code, and supply-chain risks."
+sandbox_mode = "read-only"
+role = "roles/security-reviewer.md"
+
+[[agent]]
+slug = "performance-reviewer"
+name = "seqmax_performance_reviewer"
+description = "Read-only specialist for measured performance, memory, latency, throughput, or frame-time risks."
+sandbox_mode = "read-only"
+role = "roles/performance-reviewer.md"
+
+[[agent]]
+slug = "verifier"
+name = "seqmax_verifier"
+description = "Read-only independent evaluator of final acceptance gates using direct evidence."
+sandbox_mode = "read-only"
+role = "roles/verifier.md"

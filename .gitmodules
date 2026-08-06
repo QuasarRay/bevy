@@ -1,0 +1,4 @@
+[submodule "jackdaw"]
+	path = editor/jackdaw
+	url = https://github.com/QuasarRay/jackdaw.git
+	branch = bevy-0.20-migration

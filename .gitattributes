@@ -17,3 +17,17 @@
 *.png binary
 *.jpg binary
 *.ttf binary
+
+# Preserve the exact bytes published in checksum-verified crates.io snapshots.
+editor/jackdaw/vendor/bevy-coupled/avian/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-enhanced-input/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-heavy/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-monitors/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-replicon/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-transform-interpolation/** -text
+editor/jackdaw/vendor/bevy-coupled/glam-matrix-extras/** -text
+editor/jackdaw/vendor/bevy-coupled/leafwing-input-manager/** -text
+
+# These two tracked Lightyear blobs intentionally use CRLF upstream.
+editor/jackdaw/vendor/bevy-coupled/lightyear/crates/core/lightyear/CHANGELOG.md -text
+editor/jackdaw/vendor/bevy-coupled/lightyear/crates/platform/web/CHANGELOG.md -text

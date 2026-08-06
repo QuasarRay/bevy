@@ -1,0 +1,43 @@
+[[file]]
+name = "adversarial-reviewer.toml"
+sha256 = "512e7efbeec917b3f41fbb0339e96537eb31c12c2da3248e1e03a80f70bc8f14"
+
+[[file]]
+name = "architect.toml"
+sha256 = "40a7fb30b5d07d1eb32e253a99693daa5d24d470dc5790bd0ab0afe315e28c31"
+
+[[file]]
+name = "diagnostician.toml"
+sha256 = "ca0fa409d083bbba2c480e9b9474d476c433583351dca3934451d382b7c2822c"
+
+[[file]]
+name = "explorer.toml"
+sha256 = "adf2a9a59a1afde631f922858b4f390f9a9305149a9656c38f44bfc90c38b3f2"
+
+[[file]]
+name = "implementer.toml"
+sha256 = "414ee3e2a5bfe9c3e178610dc725207e755cb41cacd6b280cb003ab55c18f129"
+
+[[file]]
+name = "migration-specialist.toml"
+sha256 = "d02e8a2571d5964d110f90e54641fc54ee4f1d44c31526da03cf18864680f454"
+
+[[file]]
+name = "performance-reviewer.toml"
+sha256 = "6139361e4a354c033cb4b0e51878ffa26b1d958e7fe4b4afb8c69d0eb7ad4038"
+
+[[file]]
+name = "researcher.toml"
+sha256 = "5f9a7c20d3e61630154aa5d6822175bf34335f15b12395ed572025169b471cb0"
+
+[[file]]
+name = "security-reviewer.toml"
+sha256 = "5524a4964a16eff2a2334c19ff7be775b58d8b6d9fafb0fbce73ad39e12b7fbf"
+
+[[file]]
+name = "test-engineer.toml"
+sha256 = "b280ee130a9146f7681edef658b2a7954886cde1238856cf3cb1ade3d7983b3d"
+
+[[file]]
+name = "verifier.toml"
+sha256 = "3dd60d8b63e7cc88645e81227fc36c2b13036741acaf6a9d983bf57f3f3b6278"

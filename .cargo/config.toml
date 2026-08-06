@@ -1,0 +1,10 @@
+# Root entry point for the integrated Jackdaw workflow. Jackdaw's nested
+# commands still execute from `editor/jackdaw`, so its own Cargo configuration
+# (including the Windows rust-lld setup) remains authoritative for editor builds.
+
+[alias]
+studio = "run --package bevy-studio-xtask --"
+# cargo-fmt recursively follows every local path dependency for `--all`, which
+# exceeds Windows' process command-line limit once Jackdaw points at this Bevy
+# checkout. The studio wrapper formats only the selected workspace in chunks.
+fmt = "run --package bevy-studio-xtask -- format"
