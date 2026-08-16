@@ -1,0 +1,36 @@
+[package]
+name = "aeronet"
+version = "0.21.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Low-level networking for Bevy"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg=docsrs_aeronet"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+
+[dependencies]
+aeronet_io = { workspace = true }
+aeronet_transport = { workspace = true }
+bevy_app = { workspace = true }
+document-features = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+## Enable this when generating docs.
+document-features = [
+  "aeronet_transport/document-features",
+  "dep:document-features",
+]
+## Enables standard library support.
+std = ["aeronet_transport/std"]
+## Enables `aeronet_transport/visualizer`.
+visualizer = ["aeronet_transport/visualizer", "std"]
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "jackdaw_fuzzy"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for the jackdaw editor"
+repository = "https://github.com/jbuehler23/jackdaw"
+license = "MIT OR Apache-2.0"
+include = ["Cargo.toml", "LICENSE*", "fonts/**/*", "src/**/*"]
+
+[dependencies]
+nucleo-matcher = "0.3.1"
+
+[lints]
+workspace = true

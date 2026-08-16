@@ -1,0 +1,389 @@
+schema_version = 1
+inventory = "editor/jackdaw/docs/bevy-coupled-inventory.json"
+bevy_revision = "25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+jackdaw_revision = "b21229553bd42c89c7798ca05d5b8f5f4bf806b3"
+jackdaw_lockfile_sha256 = "7c9c770573cbaec40041b4a408d9eff67421fd3e986fa3d678bff92c82de2912"
+
+[[upstream]]
+slug = "aeronet"
+repository = "https://github.com/aecsocket/aeronet"
+original_ref = "crates.io 0.21.0 package VCS metadata"
+original_rev = "cbbaff12df74f9f611619a89f47c75a2f01a5e32"
+registry_package_versions = [
+  "aeronet_io 0.21.0",
+  "aeronet_steam 0.21.0",
+  "aeronet_websocket 0.21.0",
+  "aeronet_webtransport 0.21.0",
+]
+registry_checksums = [
+  "aeronet_io 0.21.0 d04965191fb40bbe69e1a81111849242614eb256aee64220b3b06a8ff8bc8a5b",
+  "aeronet_steam 0.21.0 d07302d8c623fce3c40db4bd761e4c93d7e0405879975a04d57b334f23c2bee7",
+  "aeronet_websocket 0.21.0 7a928ea484a1fda0e9bf24a84eaef93328b0f1176bee37e99a3cdec78b3c58b3",
+  "aeronet_webtransport 0.21.0 34c2be31f4a24a05b93538dd4cbaaa7f0c71c29481968756eae5536177eb4fb4",
+]
+package_paths = [
+  "aeronet_io=crates/aeronet_io/Cargo.toml",
+  "aeronet_steam=crates/aeronet_steam/Cargo.toml",
+  "aeronet_websocket=crates/aeronet_websocket/Cargo.toml",
+  "aeronet_webtransport=crates/aeronet_webtransport/Cargo.toml",
+]
+import_method = "git-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/aeronet"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Disambiguated anyhow::Context from Bevy's ContextExt in the Steam server and regenerated the standalone lockfile.",
+    "Rewired the all-target example graph to the supplemental local Bevy-Egui snapshot and declared the examples' direct bevy_egui dev-dependency in the Steam, WebSocket, and WebTransport packages.",
+]
+source_verification = "Git HEAD matched original_rev; 117 copied files matched source SHA-256 values."
+
+[[upstream]]
+slug = "bevy-egui"
+supplemental = true
+supplemental_reason = "Aeronet's repository instructions require workspace Clippy with all features and all targets; its examples depend on bevy_egui, whose published 0.40.1 graph otherwise resolves Bevy 0.19. This package is not reachable from a supported Jackdaw matrix and is tracked separately from the 46-package classified closure."
+repository = "https://github.com/vladbat00/bevy_egui"
+original_ref = "crates.io bevy_egui 0.40.1"
+original_rev = "248da1144e3cfbae2ea578b1a71e80803ef2eeeb"
+registry_package_versions = ["bevy_egui 0.40.1"]
+registry_checksums = ["bevy_egui 0.40.1 7466095822999850fc52074c0b65e9f8b42da100bf7bbd10e5dc87415c6b3401"]
+package_paths = ["bevy_egui=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-egui"
+license_files = ["LICENSE"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+  "Rewired every bevy and bevy_* dependency, including dev and target-specific declarations, to repository-relative local Bevy paths and regenerated the standalone lockfile.",
+  "Updated WGPU types from 29.0.3 to 30.0.0, migrated extracted render resources to the RenderApp marker API, supplied TemporaryRenderEntity defaults, and replaced the deprecated orthographic projection constructor.",
+  "Added WGPU 30 pipeline constants to library and paint-callback example vertex/fragment states.",
+]
+source_verification = "The retained crates.io archive SHA-256 matches the locked checksum; Cargo VCS metadata records original_rev and the MIT license is retained unchanged."
+
+[[upstream]]
+slug = "avian"
+repository = "https://github.com/avianphysics/avian"
+original_ref = "crates.io avian2d/avian3d 0.7.0"
+original_rev = ""
+registry_package_versions = ["avian2d 0.7.0", "avian3d 0.7.0"]
+registry_checksums = [
+  "avian2d 0.7.0 375fa2f2b6d042bda24d6b2ecea01ef1d7c8b7b3eed5c730d3409df4778588c9",
+  "avian3d 0.7.0 35a30cb730c72527ffaca7f8806881c7e4acc70a4a74c54eb1ffb56c27f64235",
+]
+package_paths = [
+  "avian2d=packages/avian2d/Cargo.toml",
+  "avian3d=packages/avian3d/Cargo.toml",
+]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/avian"
+license_files = [
+  "packages/avian2d/LICENSE-APACHE",
+  "packages/avian2d/LICENSE-MIT",
+  "packages/avian3d/LICENSE-APACHE",
+  "packages/avian3d/LICENSE-MIT",
+]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+  "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+  "Upgraded Parry from 0.27 to 0.28 so glamx 0.3 shares Bevy's glam 0.33 type identity, aligned avian2d's dev-only glam dependency with 0.33.2, and regenerated both standalone lockfiles.",
+  "Removed the unused bevy_mod_debugdump 0.16 dev-dependency and its explicit debugdump example targets because that documentation-only edge requires Bevy 0.19; the example source files remain preserved.",
+  "Restored packages/avian3d/assets/ferris.glb from upstream tag v0.7.0 (commit 965e85bf590f53fbf8a29f7ebd0326b5dbc985d1, SHA-256 4bf5184325a1e5f441bf74256799eaa19ae8a9cf6c8a64362a901bcd898a33be) so the published scene test is runnable.",
+  "Made migration-sensitive floating-point tests tolerant to last-bit Parry/glam drift. Marked avian3d's revolute_motor_position_target ignored after an untouched Bevy 0.19/Parry 0.27 control reproduced the exact 0.120598495 upstream failure.",
+]
+source_verification = "Cargo.lock checksums are authoritative because neither package published .cargo_vcs_info.json; 169 avian2d and 168 avian3d files matched the Cargo source snapshots. The restored ferris.glb fixture matches the Avian v0.7.0 Git tag byte-for-byte."
+
+[[upstream]]
+slug = "bevy-enhanced-input"
+repository = "https://github.com/simgine/bevy_enhanced_input"
+original_ref = "crates.io bevy_enhanced_input 0.26.0"
+original_rev = "ca63988285cb97b48c7c36babf3bea3a953c26a0"
+registry_package_versions = ["bevy_enhanced_input 0.26.0"]
+registry_checksums = ["bevy_enhanced_input 0.26.0 9446023d5c2cea9983f6c6b27a77b19a626028b00e387c68686858765988e68f"]
+package_paths = ["bevy_enhanced_input=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-enhanced-input"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Migrated mouse-wheel pixel conversion to Bevy's MouseScrollPixelsPerLine resource and AccumulatedMouseScroll::to_lines API, added a configured-ratio regression test, renamed TypeIdMap to TypeIdHashMap, and regenerated the standalone lockfile.",
+]
+source_verification = "57 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "bevy-heavy"
+repository = "https://github.com/Jondolf/bevy_heavy"
+original_ref = "crates.io bevy_heavy 0.5.0"
+original_rev = "f9d2c8942edaa77da4a29849a02b872556a54104"
+registry_package_versions = ["bevy_heavy 0.5.0"]
+registry_checksums = ["bevy_heavy 0.5.0 afbd898e2c06dfba5854db187a3daece1eaf655c8fc385604bbe5b9304ed3f9b"]
+package_paths = ["bevy_heavy=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-heavy"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "verified source-compatible with local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Regenerated the standalone lockfile; no source API changes were required.",
+]
+source_verification = "19 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "bevy-monitors"
+repository = "https://github.com/Freyja-moth/bevy_monitors"
+original_ref = "crates.io bevy_monitors 0.3.0"
+original_rev = "1b84e823561acf1eaf6f141fb2fe219357c54349"
+registry_package_versions = ["bevy_monitors 0.3.0"]
+registry_checksums = ["bevy_monitors 0.3.0 f8749206cc67a567f0d3296a690f6ba317c6ec3f943156e515f0559d01a619db"]
+package_paths = ["bevy_monitors=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-monitors"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "verified source-compatible with local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Regenerated the standalone lockfile; no source API changes were required.",
+]
+source_verification = "14 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "bevy-replicon"
+repository = "https://github.com/simgine/bevy_replicon"
+original_ref = "crates.io bevy_replicon 0.41.1"
+original_rev = "60e3c5ea164385b1b95932542f949d123c3db5c4"
+registry_package_versions = ["bevy_replicon 0.41.1"]
+registry_checksums = ["bevy_replicon 0.41.1 a25105650eb1b27c6ada888e06bb38ff7e326a94c7c5b4d75fb5aee50c5ae45e"]
+package_paths = ["bevy_replicon=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-replicon"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Migrated deterministic TypeId storage to TypeIdIndexMap, renamed set_if_neq calls to set_if_different, and regenerated the standalone lockfile.",
+]
+source_verification = "79 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "bevy-transform-interpolation"
+repository = "https://github.com/Jondolf/bevy_transform_interpolation"
+original_ref = "crates.io bevy_transform_interpolation 0.5.0"
+original_rev = "3b166ed9a4a2b1cd6b91c80e59891830390a347d"
+registry_package_versions = ["bevy_transform_interpolation 0.5.0"]
+registry_checksums = ["bevy_transform_interpolation 0.5.0 ea40784f1c6a3f61333064ea1d1c7663ef677c1ce46b5ca148c46c4a62c27e62"]
+package_paths = ["bevy_transform_interpolation=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/bevy-transform-interpolation"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "verified source-compatible with local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Regenerated the standalone lockfile; no source API changes were required.",
+]
+source_verification = "19 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "glam-matrix-extras"
+repository = "https://github.com/Jondolf/glam_matrix_extras"
+original_ref = "crates.io glam_matrix_extras 0.3.0"
+original_rev = "9e1276dc6ccc31eb75d92cce59a2595cb6ccdfed"
+registry_package_versions = ["glam_matrix_extras 0.3.0"]
+registry_checksums = ["glam_matrix_extras 0.3.0 db060a7f23a5666ccbe9c770cd0e0e419b2eb94c86a7c8bfd091bacf8b4926cd"]
+package_paths = ["glam_matrix_extras=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/glam-matrix-extras"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Aligned glam with Bevy's 0.33.2 identity, forwarded the f64 feature, restored the upstream test feature dependency, made assignment receivers explicit for current Rust method resolution, migrated ReflectDefault imports, and regenerated the root and standalone lockfiles.",
+]
+source_verification = "27 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "leafwing-input-manager"
+repository = "https://github.com/leafwing-studios/leafwing-input-manager"
+original_ref = "crates.io leafwing-input-manager 0.21.0"
+original_rev = "346305d94275cc80a7c55a918ca1600f8a7b4add"
+registry_package_versions = ["leafwing-input-manager 0.21.0"]
+registry_checksums = ["leafwing-input-manager 0.21.0 fd2052ba82a881309ab7a01d14136f861fde5e8ad43c041659f0f9a9a6ceace0"]
+package_paths = ["leafwing-input-manager=Cargo.toml"]
+import_method = "crates-io-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/leafwing-input-manager"
+license_files = ["LICENSE-APACHE.md", "LICENSE-MIT.md"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+    "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+    "Migrated reflected trait-object type-data registration from FromType to explicit CreateTypeData calls and regenerated the standalone lockfile.",
+]
+source_verification = "74 copied files matched the checksum-verified Cargo source snapshot."
+
+[[upstream]]
+slug = "lightyear"
+repository = "https://github.com/cBournhonesque/lightyear"
+original_ref = "crates.io 0.28.0 package VCS metadata"
+original_rev = "28e823d9df394c193dfc09f8eb891b77424e81c5"
+registry_package_versions = [
+  "lightyear 0.28.0",
+  "lightyear_aeronet 0.28.0",
+  "lightyear_avian2d 0.28.0",
+  "lightyear_avian3d 0.28.0",
+  "lightyear_connection 0.28.0",
+  "lightyear_core 0.28.0",
+  "lightyear_deterministic_replication 0.28.0",
+  "lightyear_frame_interpolation 0.28.0",
+  "lightyear_inputs 0.28.0",
+  "lightyear_inputs_bei 0.28.0",
+  "lightyear_inputs_leafwing 0.28.0",
+  "lightyear_inputs_native 0.28.0",
+  "lightyear_interpolation 0.28.0",
+  "lightyear_link 0.28.0",
+  "lightyear_messages 0.28.0",
+  "lightyear_metrics 0.28.0",
+  "lightyear_netcode 0.28.0",
+  "lightyear_prediction 0.28.0",
+  "lightyear_raw_connection 0.28.0",
+  "lightyear_replication 0.28.0",
+  "lightyear_serde 0.28.0",
+  "lightyear_steam 0.28.0",
+  "lightyear_sync 0.28.0",
+  "lightyear_tools 0.28.0",
+  "lightyear_transport 0.28.0",
+  "lightyear_udp 0.28.0",
+  "lightyear_utils 0.28.0",
+  "lightyear_websocket 0.28.0",
+  "lightyear_webtransport 0.28.0",
+]
+registry_checksums = [
+  "lightyear 0.28.0 4ccf8a5a84d29c0bdf7db4b7a709a8699f3a8359927c8310ffb5b6dd0056d883",
+  "lightyear_aeronet 0.28.0 66fb1f65e664b5456ff5029bf242f554ddacf8a8b45c8f233e43802077900592",
+  "lightyear_avian2d 0.28.0 226205837bacb1723b383e29dab8d903901aaf5be00037941769f5be13c78896",
+  "lightyear_avian3d 0.28.0 dbb481e8ccfaf3f35586da46092f1fe232619ee34422786427ab35c1471b3a81",
+  "lightyear_connection 0.28.0 4d66880a2e656ff9ed43898e7593e0c5ee013687d52ad43ddef04de4b00a8f2d",
+  "lightyear_core 0.28.0 3b5882cda02c297336b79c0fc7caeaad656fe05d0a12cdbbdde38359369b2ed1",
+  "lightyear_deterministic_replication 0.28.0 bdd0989fe60f91f5d4f9a9281aaa00bc2a6868e6d0a3819ccdd5ef65ae9d8108",
+  "lightyear_frame_interpolation 0.28.0 c6ae3a2ec5e9492b48efe0ebbbea39962d20a7b899e4403d94f1a3f49948ac16",
+  "lightyear_inputs 0.28.0 a03fac5216402f484b0018318b1174c7d3530e8886745bc954c6883f7e882edd",
+  "lightyear_inputs_bei 0.28.0 336d6f7c302924c1093fd1959c5ebdf59f8bdea74af5d0e58585b9883bda8c0a",
+  "lightyear_inputs_leafwing 0.28.0 bb0f00b5535d0b867d01f185ac49330167218cc60433402c86f920eacc2eda68",
+  "lightyear_inputs_native 0.28.0 765cb40b1a38396e4f311e0bb4da99a96b36d40bcf6cf64a80585433a88fcc7a",
+  "lightyear_interpolation 0.28.0 eb312a07c83674e7f581aa19b30576edc6561617e8e06bd2100a50ff74d8975e",
+  "lightyear_link 0.28.0 f9f78fdd1e0722b9c488896a21b20c11e6cb435d93f1f0bd472a7c7c4abbbd45",
+  "lightyear_messages 0.28.0 a183859015aef9270415787c456fcd3d6b1ab7fee1134fde1ddd49befc043e50",
+  "lightyear_metrics 0.28.0 64e00d80e123c73cf1dc121875852e1c7447cee26a0c1f37f7bb322a32ba6839",
+  "lightyear_netcode 0.28.0 7f009241f6954e89fc2417f10488deee00cca08028e4eb20b7ad8c4954fc8832",
+  "lightyear_prediction 0.28.0 a2054a4758b5a8a57532dbf48501a4a9bedb5121cc6a28fd6d3b5e089b1dee4c",
+  "lightyear_raw_connection 0.28.0 1c3dd25d5168ece94862f36fc4f9531caff7c92bca604754ac5fb86886a41c4e",
+  "lightyear_replication 0.28.0 25bd33e61d5fe7925e36cd1e9844b872d99dcf8bea1653a8049261bccadb7cb5",
+  "lightyear_serde 0.28.0 99e7f9c535d3b2e73b6f9eca4a180972d41d11ae6f4c0310caf1fb59379730a6",
+  "lightyear_steam 0.28.0 2e7886d0ea99ab0b9e021d5627ea1a9810f8c2bcd0189c2402ff29541d52fb01",
+  "lightyear_sync 0.28.0 98c8790e915819a587a0b63b3a1826fea85583ac4878b0c52f0e21f0765ea399",
+  "lightyear_tools 0.28.0 a4e6425d9b85396c2920f764af46452ceb1fd44b7e099f8792b08702cea0c2b0",
+  "lightyear_transport 0.28.0 f5a2263fb8894355217420cb49a0a25fc74aaa5638dbf58e519bb2660c91ae83",
+  "lightyear_udp 0.28.0 f5de693f3e82a67aeed2bdec3f29dad9394aaa5b8a63c6268131824e4d312a71",
+  "lightyear_utils 0.28.0 400b72926af5383e43619035d8d3becc0fc5d271ff330374ccedbf0b6cd31404",
+  "lightyear_websocket 0.28.0 754048029ad9ceb2a108d0546bd20dfceb78aa1d85d9d6900e5b357a466cbafc",
+  "lightyear_webtransport 0.28.0 37d9b8cc1471cdf897c4d1810606eac9011b75dd18a23acc0dd6e82af35f62ec",
+]
+package_paths = [
+  "lightyear=crates/core/lightyear/Cargo.toml",
+  "lightyear_aeronet=crates/io/aeronet/Cargo.toml",
+  "lightyear_avian2d=crates/integration/avian2d/Cargo.toml",
+  "lightyear_avian3d=crates/integration/avian3d/Cargo.toml",
+  "lightyear_connection=crates/connection/connection/Cargo.toml",
+  "lightyear_core=crates/core/core/Cargo.toml",
+  "lightyear_deterministic_replication=crates/deterministic/deterministic_replication/Cargo.toml",
+  "lightyear_frame_interpolation=crates/core/frame_interpolation/Cargo.toml",
+  "lightyear_inputs=crates/inputs/inputs/Cargo.toml",
+  "lightyear_inputs_bei=crates/inputs/input_bei/Cargo.toml",
+  "lightyear_inputs_leafwing=crates/inputs/inputs_leafwing/Cargo.toml",
+  "lightyear_inputs_native=crates/inputs/inputs_native/Cargo.toml",
+  "lightyear_interpolation=crates/replication/interpolation/Cargo.toml",
+  "lightyear_link=crates/io/link/Cargo.toml",
+  "lightyear_messages=crates/transport/messages/Cargo.toml",
+  "lightyear_metrics=crates/tools/metrics/Cargo.toml",
+  "lightyear_netcode=crates/connection/netcode/Cargo.toml",
+  "lightyear_prediction=crates/replication/prediction/Cargo.toml",
+  "lightyear_raw_connection=crates/connection/raw_connection/Cargo.toml",
+  "lightyear_replication=crates/replication/replication/Cargo.toml",
+  "lightyear_serde=crates/transport/serde/Cargo.toml",
+  "lightyear_steam=crates/connection/steam/Cargo.toml",
+  "lightyear_sync=crates/core/sync/Cargo.toml",
+  "lightyear_tools=crates/tools/tools/Cargo.toml",
+  "lightyear_transport=crates/transport/transport/Cargo.toml",
+  "lightyear_udp=crates/io/udp/Cargo.toml",
+  "lightyear_utils=crates/core/utils/Cargo.toml",
+  "lightyear_websocket=crates/io/websocket/Cargo.toml",
+  "lightyear_webtransport=crates/io/webtransport/Cargo.toml",
+]
+import_method = "git-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/lightyear"
+license_files = ["LICENSE-APACHE", "LICENSE-MIT"]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+  "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+  "Migrated the debug UI from legacy mutable Interaction handling to Bevy main's ButtonPlugin and Pressed marker lifecycle.",
+  "Widened entity indices before Lightyear's flag-bit encoding and added checked decoding so Bevy main's full entity-index range, including PLACEHOLDER, round-trips without truncation.",
+  "Updated the delta test's component-registry setup for current Bevy Replicon while retaining upstream's explicitly unfinished delta implementation unchanged.",
+]
+source_verification = "All published packages named the same VCS revision; Git HEAD matched original_rev; 634 copied files matched source SHA-256 values."
+
+[[upstream]]
+slug = "rerecast"
+repository = "https://github.com/HeyPlayGames/rerecast"
+original_ref = "rev=493074cd8c1e8c97bc8fc6b51da01e5295696860"
+original_rev = "493074cd8c1e8c97bc8fc6b51da01e5295696860"
+registry_package_versions = []
+registry_checksums = []
+package_versions = [
+  "bevy_rerecast 0.4.0",
+  "bevy_rerecast_core 0.4.1",
+  "bevy_rerecast_editor_integration 0.4.1",
+  "rerecast 0.3.4",
+]
+package_paths = [
+  "bevy_rerecast=crates/bevy_rerecast/Cargo.toml",
+  "bevy_rerecast_core=crates/bevy_rerecast_core/Cargo.toml",
+  "bevy_rerecast_editor_integration=crates/bevy_rerecast_editor_integration/Cargo.toml",
+  "rerecast=crates/rerecast/Cargo.toml",
+]
+import_method = "git-snapshot"
+local_path = "editor/jackdaw/vendor/bevy-coupled/rerecast"
+license_files = [
+  "license-apache.txt",
+  "license-mit.txt",
+  "assets/environment_maps/license.md",
+  "assets/models/license.md",
+  "crates/bevy_rerecast_editor/src/camera/assets/environment_maps/license.md",
+]
+bevy_before = "0.19.0"
+bevy_after = "0.20.0-dev at 25368b78ce5e9b15dc770cdf2af4595602cc8a7b"
+migration_status = "classified packages migrated and verified against local Bevy 0.20.0-dev"
+local_modifications = [
+  "Rewired supported Bevy and Bevy-coupled dependency declarations to repository-relative local paths while preserving dependency semantics.",
+  "Aligned the shared glam dependency with Bevy's 0.33.2 identity and enabled glam's all-types feature to preserve the integer and double-precision type surface that glam 0.32 exposed without feature gates.",
+  "Disambiguated BevyError context construction in bevy_rerecast_core and anyhow context construction in bevy_rerecast_editor_integration after Bevy main exported ContextExt through the ECS prelude.",
+  "Regenerated the standalone lockfile after the glam and vendored Avian/Parry migrations.",
+]
+source_verification = "Locked Cargo Git checkout HEAD matched original_rev; 119 copied files matched source SHA-256 values."

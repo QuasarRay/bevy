@@ -1,0 +1,19 @@
+[book]
+authors = ["Charles Bournhonesque"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Lightyear book"
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output]
+
+#[output.linkcheck]
+
+[output.html]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+site-url = "/book/"

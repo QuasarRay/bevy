@@ -1,0 +1,654 @@
+use crate::entity_label::*;
+/// Renders entities using gizmos to draw outlines
+use crate::protocol::*;
+use crate::shared::*;
+use avian2d::parry::shape::SharedShape;
+use avian2d::prelude::*;
+use bevy::color::palettes::css;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::post_process::bloom::Bloom;
+use bevy::prelude::*;
+use bevy::time::common_conditions::on_timer;
+use core::f32::consts::PI;
+use core::f32::consts::TAU;
+use core::time::Duration;
+use leafwing_input_manager::action_state::ActionState;
+use lightyear::connection::client_of::ClientOf;
+use lightyear::connection::identity::is_server;
+use lightyear::input::leafwing::prelude::{LeafwingBuffer, LeafwingSnapshot};
+use lightyear::prelude::input::InputBuffer;
+use lightyear::prelude::*;
+use lightyear_frame_interpolation::{FrameInterpolate, FrameInterpolationPlugin};
+
+pub struct ExampleRendererPlugin;
+
+impl Plugin for ExampleRendererPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, init_camera);
+        app.insert_resource(ClearColor::default());
+        let draw_shadows = false;
+
+        // draw after visual interpolation has propagated
+        app.add_systems(
+            PostUpdate,
+            (
+                update_player_label,
+                draw_confirmed_shadows.run_if(move || draw_shadows),
+                draw_predicted_entities,
+                draw_confirmed_entities.run_if(is_server),
+                draw_explosions,
+                emit_bullet_visual_state,
+            )
+                .chain()
+                .after(TransformSystems::Propagate),
+        );
+        app.add_observer(add_player_label);
+        app.add_observer(add_wall_visual);
+
+        app.add_systems(FixedPreUpdate, insert_bullet_mesh);
+        app.add_systems(
+            PostUpdate,
+            update_bullet_visual_offsets.before(TransformSystems::Propagate),
+        );
+
+        app.add_plugins(EntityLabelPlugin);
+
+        // set up visual interp plugins for Transform
+        app.add_plugins(FrameInterpolationPlugin::<Transform>::default());
+
+        // observers that add VisualInterpolationStatus components to entities which receive
+        // a Position
+        app.add_observer(add_frame_interpolation_components);
+    }
+}
+
+// Non-wall entities get some frame interpolation by adding the lightyear
+// FrameInterpolate component
+//
+// We query filter With<Predicted> so that the correct client entities get visual-interpolation.
+// We don't want to frame interpolate the client's Confirmed entities, since they are not rendered.
+//
+// We must trigger change detection so that the Transform updates from interpolation
+// will be propagated to children (sprites, meshes, text, etc.)
+fn add_frame_interpolation_components(
+    // We use Position because it's added by avian later, and when it's added
+    // we know that Predicted is already present on the entity
+    trigger: On<Add, Position>,
+    q: Query<Entity, (Without<Wall>, With<Predicted>)>,
+    mut commands: Commands,
+) {
+    if !q.contains(trigger.entity) {
+        return;
+    }
+    debug!("Adding visual interp component to {:?}", trigger.entity);
+    commands
+        .entity(trigger.entity)
+        .insert(FrameInterpolate::<Transform> {
+            // We must trigger change detection on visual interpolation
+            // to make sure that child entities (sprites, meshes, text)
+            // are also interpolated
+            trigger_change_detection: true,
+            ..default()
+        });
+}
+
+fn init_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera { ..default() },
+        Tonemapping::None,
+        Bloom::default(),
+        Visibility::default(),
+    ));
+}
+
+fn add_player_label(
+    trigger: On<Add, Player>,
+    mut commands: Commands,
+    // add the label on both client and server
+    q: Query<(Entity, &Player, &Score)>,
+) {
+    if let Ok((e, player, score)) = q.get(trigger.entity) {
+        info!("Adding visual bits to {e:?}");
+        commands.entity(e).insert((
+            Visibility::default(),
+            EntityLabel {
+                text: format!("{} <{}>\n", player.nickname, score.0),
+                color: css::ANTIQUE_WHITE.with_alpha(0.8).into(),
+                offset: Vec2::Y * -45.0,
+                ..Default::default()
+            },
+        ));
+    }
+}
+
+// update the labels when the player rtt/jitter is updated by the server
+fn update_player_label(
+    mut q: Query<(
+        Entity,
+        &Player,
+        &mut EntityLabel,
+        &LeafwingBuffer<PlayerActions>,
+        &Score,
+    )>,
+    timeline: Res<LocalTimeline>,
+) {
+    let tick = timeline.tick();
+    for (e, player, mut label, input_buffer, score) in q.iter_mut() {
+        // hopefully this is positive, ie we have received remote player inputs before they are needed.
+        // this can happen because of input_delay. The server receives inputs in advance of
+        // needing them, and rebroadcasts to other players.
+        let num_buffered_inputs = if let Some(end_tick) = input_buffer.last_remote_tick {
+            end_tick - tick
+        } else {
+            0
+        };
+        label.text = format!("{} <{}>\n", player.nickname, score.0);
+        label.sub_text = format!(
+            "{}~{}ms [{num_buffered_inputs}]",
+            player.rtt.as_millis(),
+            player.jitter.as_millis()
+        );
+    }
+}
+
+/// System that draws the outlines of confirmed entities, with lines to the centre of their predicted location.
+pub(crate) fn draw_confirmed_shadows(
+    mut gizmos: Gizmos,
+    query: Query<
+        (
+            &Position,
+            &Collider,
+            &ColorComponent,
+            &ConfirmedHistory<Position>,
+            &ConfirmedHistory<Rotation>,
+            &ConfirmedHistory<LinearVelocity>,
+        ),
+        (
+            With<Predicted>,
+            Or<(With<Player>, With<BallMarker>, With<BulletMarker>)>,
+        ),
+    >,
+) {
+    for (pred_pos, collider, color, pos_history, rot_history, vel_history) in query.iter() {
+        let Some((_, confirmed_pos)) = pos_history
+            .get_nth_present(1)
+            .or_else(|| pos_history.start_present())
+        else {
+            continue;
+        };
+        let Some((_, confirmed_rot)) = rot_history
+            .get_nth_present(1)
+            .or_else(|| rot_history.start_present())
+        else {
+            continue;
+        };
+        let confirmed_speed = vel_history
+            .get_nth_present(1)
+            .or_else(|| vel_history.start_present())
+            .map(|(_, v)| v.length())
+            .unwrap_or(0.0);
+        let speed = confirmed_speed / MAX_VELOCITY;
+        let ghost_col = color.0.with_alpha(0.2 + speed * 0.8);
+        render_shape(
+            collider.shape(),
+            confirmed_pos,
+            confirmed_rot,
+            &mut gizmos,
+            ghost_col,
+        );
+        gizmos.line_2d(confirmed_pos.0, pred_pos.0, ghost_col);
+    }
+}
+
+/// System that draws the player's boxes and cursors
+fn draw_predicted_entities(
+    mut gizmos: Gizmos,
+    predicted: Query<
+        (
+            Entity,
+            &Position,
+            &Rotation,
+            &ColorComponent,
+            &Collider,
+            Has<PreSpawned>,
+            Option<&ActionState<PlayerActions>>,
+            Option<&LeafwingBuffer<PlayerActions>>,
+        ),
+        (
+            // skip drawing bullet outlines, since we add a mesh + material to them
+            Without<BulletMarker>,
+            Or<(With<PreSpawned>, With<Predicted>)>,
+        ),
+    >,
+    timeline: Res<LocalTimeline>,
+) {
+    let tick = timeline.tick();
+    for (e, position, rotation, color, collider, prespawned, opt_action, opt_ib) in &predicted {
+        // render prespawned translucent until acknowledged by the server
+        // (at which point the PreSpawned component is removed)
+        let col = if prespawned {
+            color.0.with_alpha(0.5)
+        } else {
+            color.0
+        };
+
+        render_shape(collider.shape(), position, rotation, &mut gizmos, col);
+        // render engine exhaust for players holding down thrust.
+        let Some(action) = opt_action else {
+            continue;
+        };
+        let Some(ib) = opt_ib else {
+            continue;
+        };
+        let mut is_thrusting = action.pressed(&PlayerActions::Up);
+        if !is_thrusting {
+            // if inputs are late for this player, we'll render the engine if their
+            // last input was thrust. otherwise remote players with late inputs will never
+            // appear to be thrusting, since it all happens in rollback.
+            if let Some(action) = ib.get_last() {
+                is_thrusting = action.pressed(&PlayerActions::Up);
+            }
+        }
+
+        if is_thrusting {
+            // draw an engine exhaust triangle
+            let width = 0.6 * (SHIP_WIDTH / 2.0);
+            let points = vec![
+                Vec2::new(width, (-SHIP_LENGTH / 2.) - 3.0),
+                Vec2::new(-width, (-SHIP_LENGTH / 2.) - 3.0),
+                Vec2::new(0.0, (-SHIP_LENGTH / 2.) - 10.0),
+            ];
+            let collider = Collider::convex_hull(points).unwrap();
+            render_shape(
+                collider.shape(),
+                position,
+                rotation,
+                &mut gizmos,
+                (col.to_linear() * 2.5).into(), // bloom
+            );
+        }
+    }
+}
+
+/// Draws confirmed entities that have colliders.
+/// Only useful on the server
+fn draw_confirmed_entities(
+    mut gizmos: Gizmos,
+    confirmed: Query<
+        (
+            &Position,
+            &Rotation,
+            &ColorComponent,
+            &Collider,
+            Option<&ActionState<PlayerActions>>,
+            &ColorComponent,
+        ),
+        Or<(With<Player>, With<BallMarker>, With<BulletMarker>)>,
+    >,
+) {
+    for (position, rotation, color, collider, opt_action, col) in &confirmed {
+        render_shape(collider.shape(), position, rotation, &mut gizmos, color.0);
+        // render engine exhaust for players holding down thrust.
+        if let Some(action) = opt_action
+            && action.pressed(&PlayerActions::Up)
+        {
+            let width = 0.6 * (SHIP_WIDTH / 2.0);
+            let points = vec![
+                Vec2::new(width, (-SHIP_LENGTH / 2.) - 3.0),
+                Vec2::new(-width, (-SHIP_LENGTH / 2.) - 3.0),
+                Vec2::new(0.0, (-SHIP_LENGTH / 2.) - 10.0),
+            ];
+            let collider = Collider::convex_hull(points).unwrap();
+            render_shape(
+                collider.shape(),
+                position,
+                rotation,
+                &mut gizmos,
+                col.0.with_alpha(0.7),
+            );
+        }
+    }
+}
+
+// draws explosion effects, and despawns them once they expire
+fn draw_explosions(
+    mut gizmos: Gizmos,
+    q: Query<(Entity, &Explosion, &Transform)>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    for (e, explosion, transform) in q.iter() {
+        if let Some((color, radius)) = explosion.compute_at_time(time.elapsed()) {
+            gizmos.circle_2d(transform.translation.xy(), radius, color);
+        } else {
+            commands.entity(e).despawn();
+        }
+    }
+}
+
+/// renders various shapes using gizmos
+pub fn render_shape(
+    shape: &SharedShape,
+    pos: &Position,
+    rot: &Rotation,
+    gizmos: &mut Gizmos,
+    render_color: Color,
+) {
+    if let Some(triangle) = shape.as_triangle() {
+        let p1 = pos.0 + rot * Vec2::new(triangle.a[0], triangle.a[1]);
+        let p2 = pos.0 + rot * Vec2::new(triangle.b[0], triangle.b[1]);
+        let p3 = pos.0 + rot * Vec2::new(triangle.c[0], triangle.c[1]);
+        gizmos.line_2d(p1, p2, render_color);
+        gizmos.line_2d(p2, p3, render_color);
+        gizmos.line_2d(p3, p1, render_color);
+    } else if let Some(poly) = shape.as_convex_polygon() {
+        let last_p = poly.points().last().unwrap();
+        let mut start_p = pos.0 + (rot * Vec2::new(last_p.x, last_p.y));
+        for i in 0..poly.points().len() {
+            let p = poly.points()[i];
+            let tmp = pos.0 + (rot * Vec2::new(p.x, p.y));
+            gizmos.line_2d(start_p, tmp, render_color);
+            start_p = tmp;
+        }
+    } else if let Some(cuboid) = shape.as_cuboid() {
+        let points: Vec<Vec3> = cuboid
+            .to_polyline()
+            .into_iter()
+            .map(|p| Vec3::new(p.x, p.y, 0.0))
+            .collect();
+        let mut start_p = pos.0 + (rot * points.last().unwrap().truncate());
+        for point in &points {
+            let tmp = pos.0 + (rot * point.truncate());
+            gizmos.line_2d(start_p, tmp, render_color);
+            start_p = tmp;
+        }
+    } else if let Some(ball) = shape.as_ball() {
+        gizmos.circle_2d(pos.0, ball.radius, render_color);
+    } else {
+        panic!("unimplemented render");
+    }
+}
+
+fn insert_bullet_mesh(
+    q: Query<
+        (
+            Entity,
+            &Collider,
+            &ColorComponent,
+            &BulletMarker,
+            Option<&Position>,
+            Has<Interpolated>,
+            Has<Predicted>,
+            Has<PreSpawned>,
+            Has<Replicate>,
+        ),
+        (
+            With<BulletMarker>,
+            With<Collider>,
+            Without<BulletVisualAttached>,
+        ),
+    >,
+    players: Query<(&Player, &Position, Option<&Rotation>), With<Predicted>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for (
+        entity,
+        collider,
+        col,
+        bullet,
+        bullet_position,
+        is_interpolated,
+        is_predicted,
+        is_prespawned,
+        is_replicate,
+    ) in q.iter()
+    {
+        if !is_predicted && !is_prespawned && !is_interpolated && !is_replicate {
+            continue;
+        }
+
+        let ball = collider
+            .shape()
+            .as_ball()
+            .expect("Bullets expected to be balls.");
+        let ball = Circle::new(ball.radius);
+        let mesh = Mesh::from(ball);
+        let mut visual_transform = Transform::from_translation(Vec3::Z);
+        let mut catchup = None;
+
+        if is_interpolated
+            && let Some(bullet_position) = bullet_position
+            && let Some((_, player_position, player_rotation)) = players
+                .iter()
+                .find(|(player, _, _)| player.client_id == bullet.owner)
+        {
+            let player_rotation = player_rotation.copied().unwrap_or_default();
+            let bullet_spawn_offset = Vec2::Y * (2.0 + (SHIP_LENGTH + BULLET_SIZE) / 2.0);
+            let visual_start = player_position.0 + player_rotation * bullet_spawn_offset;
+            let offset = visual_start - bullet_position.0;
+            if offset.length_squared() > 1.0 {
+                visual_transform.translation = offset.extend(1.0);
+                catchup = Some(BulletVisualCatchup::new(offset));
+            }
+            lightyear_debug_event!(
+                DebugCategory::Component,
+                DebugSamplePoint::FixedPreUpdate,
+                "FixedPreUpdate",
+                "spaceships_bullet_visual_inserted",
+                bullet = ?entity,
+                owner = ?bullet.owner,
+                is_interpolated = is_interpolated,
+                bullet_position = ?bullet_position,
+                visual_start = ?visual_start,
+                visual_offset = ?offset,
+                "Inserted interpolated bullet visual"
+            );
+        }
+
+        commands
+            .entity(entity)
+            .try_insert((Visibility::default(), BulletVisualAttached));
+        commands.entity(entity).with_children(|parent| {
+            let mut child = parent.spawn((
+                BulletVisualMesh,
+                Mesh2d(meshes.add(mesh)),
+                visual_transform,
+                MeshMaterial2d(materials.add(ColorMaterial::from(col.0))),
+                Visibility::default(),
+            ));
+            if let Some(catchup) = catchup {
+                child.insert(catchup);
+            }
+        });
+    }
+}
+
+#[derive(Component)]
+struct BulletVisualAttached;
+
+#[derive(Component)]
+struct BulletVisualMesh;
+
+#[derive(Component)]
+struct BulletVisualCatchup {
+    initial_offset: Vec2,
+    elapsed: f32,
+    duration: f32,
+}
+
+impl BulletVisualCatchup {
+    fn new(initial_offset: Vec2) -> Self {
+        Self {
+            initial_offset,
+            elapsed: 0.0,
+            duration: 0.18,
+        }
+    }
+}
+
+fn update_bullet_visual_offsets(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut visuals: Query<(Entity, &mut Transform, &mut BulletVisualCatchup), With<BulletVisualMesh>>,
+) {
+    for (entity, mut transform, mut catchup) in &mut visuals {
+        catchup.elapsed += time.delta_secs();
+        let progress = (catchup.elapsed / catchup.duration).clamp(0.0, 1.0);
+        let offset = catchup.initial_offset * (1.0 - progress);
+        transform.translation = offset.extend(1.0);
+        if progress >= 1.0 {
+            transform.translation = Vec3::Z;
+            commands.entity(entity).remove::<BulletVisualCatchup>();
+        }
+    }
+}
+
+fn emit_bullet_visual_state(
+    timeline: Res<LocalTimeline>,
+    bullets: Query<
+        (
+            Entity,
+            &BulletMarker,
+            &BulletLifetime,
+            &Position,
+            &Transform,
+            &GlobalTransform,
+            Option<&Visibility>,
+            Has<Interpolated>,
+            Has<Predicted>,
+            Has<PreSpawned>,
+        ),
+        With<BulletMarker>,
+    >,
+    visual_children: Query<
+        (
+            Entity,
+            &ChildOf,
+            &Transform,
+            &GlobalTransform,
+            Has<BulletVisualCatchup>,
+        ),
+        With<BulletVisualMesh>,
+    >,
+) {
+    let tick = timeline.tick();
+    for (
+        entity,
+        marker,
+        lifetime,
+        position,
+        transform,
+        global_transform,
+        visibility,
+        is_interpolated,
+        is_predicted,
+        is_prespawned,
+    ) in &bullets
+    {
+        let visual = visual_children
+            .iter()
+            .find(|(_, child_of, _, _, _)| child_of.parent() == entity)
+            .map(
+                |(child, _, visual_transform, visual_global_transform, has_catchup)| {
+                    (
+                        child,
+                        visual_transform.translation.truncate(),
+                        visual_global_transform.translation().truncate(),
+                        has_catchup,
+                    )
+                },
+            );
+        lightyear_debug_event!(
+            DebugCategory::Component,
+            DebugSamplePoint::PostUpdate,
+            "PostUpdate",
+            "spaceships_bullet_visual_state",
+            local_tick = tick.0 as i64,
+            entity = ?entity,
+            owner = ?marker.owner,
+            owner_bits = marker.owner.to_bits(),
+            origin_tick = lifetime.origin_tick.0 as i64,
+            position = ?position,
+            transform = ?transform.translation.truncate(),
+            global_transform = ?global_transform.translation().truncate(),
+            visibility = ?visibility,
+            visual = ?visual,
+            is_interpolated = is_interpolated,
+            is_predicted = is_predicted,
+            is_prespawned = is_prespawned,
+            "Spaceships bullet visual state after transform propagation"
+        );
+    }
+}
+
+#[derive(Component)]
+struct WallVisual;
+
+fn add_wall_visual(
+    trigger: On<Add, Wall>,
+    walls: Query<(&Wall, &ColorComponent)>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let Ok((wall, color)) = walls.get(trigger.entity) else {
+        return;
+    };
+    let delta = wall.end - wall.start;
+    let length = delta.length();
+    if length == 0.0 {
+        return;
+    }
+    let midpoint = (wall.start + wall.end) * 0.5;
+    let angle = delta.y.atan2(delta.x);
+    commands
+        .entity(trigger.entity)
+        .insert(Visibility::default())
+        .with_children(|parent| {
+            parent.spawn((
+                WallVisual,
+                Mesh2d(meshes.add(Rectangle::new(length, 2.0))),
+                MeshMaterial2d(materials.add(ColorMaterial::from(color.0))),
+                Transform::from_xyz(midpoint.x, midpoint.y, 0.0)
+                    .with_rotation(Quat::from_rotation_z(angle)),
+                Visibility::default(),
+            ));
+        });
+}
+
+#[derive(Component)]
+pub struct Explosion {
+    spawn_time: Duration,
+    max_age: Duration,
+    color: Color,
+    initial_radius: f32,
+}
+
+impl Explosion {
+    pub fn new(now: Duration, color: Color) -> Self {
+        Self {
+            spawn_time: now,
+            max_age: Duration::from_millis(70),
+            initial_radius: BULLET_SIZE,
+            color,
+        }
+    }
+
+    // Gives a color and radius based on elapsed time, for a simple visual explosion effect.
+    //
+    // None = despawn due to expiry.
+    pub fn compute_at_time(&self, now: Duration) -> Option<(Color, f32)> {
+        let age = now - self.spawn_time;
+        if age > self.max_age {
+            return None;
+        }
+        // starts at 0.0, once max_age reached, is 1.0.
+        let progress = (age.as_secs_f32() / self.max_age.as_secs_f32()).clamp(0.0, 1.0);
+        let color = self.color.with_alpha(1.0 - progress);
+        let radius = self.initial_radius + (1.0 - progress) * self.initial_radius * 3.0;
+        Some((color, radius))
+    }
+}

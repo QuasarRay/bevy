@@ -1,0 +1,141 @@
+name: Main
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - ".gitignore"
+      - ".github/dependabot.yml"
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - ".gitignore"
+      - ".github/dependabot.yml"
+      - "**.md"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --deny warnings -C debuginfo=line-tables-only
+  RUSTDOCFLAGS: --deny warnings
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-all-crates: true
+          shared-key: lints
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-deps
+        with:
+          wayland: true
+          xkb: true
+
+      - name: Install Taplo
+        run: cargo install --locked taplo-cli
+
+      - name: Format
+        run: |
+          cargo fmt --all --check
+          taplo fmt --check
+
+      - name: Clippy lightyear
+        run: cargo clippy --features=lightyear_core/not_mock,avian3d/f32 --workspace --exclude=compiletime --exclude=avian_3d_character --exclude=launcher --exclude=delta_compression --exclude=distributed_authority --no-deps -- -D warnings -A clippy::needless_lifetimes
+
+  docs:
+    name: Doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-all-crates: true
+          shared-key: lints
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-deps
+        with:
+          wayland: true
+          xkb: true
+
+      - name: Rustdoc
+        env:
+          # Must match [package.metadata.docs.rs]
+          RUSTFLAGS: --cfg docsrs_dep -A mismatched_lifetime_syntaxes
+          RUSTDOCFLAGS: --cfg=docsrs
+        run: cargo +nightly doc --all-features --workspace --features "avian2d/2d avian2d/f32 avian3d/3d avian3d/f32" --document-private-items --no-deps --keep-going
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v7
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache crates
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-deps
+        with:
+          wayland: true
+          xkb: true
+
+      - name: Install LLVM tools
+        run: rustup component add llvm-tools-preview
+
+      - name: Install Tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: lightyear_tests
+        env:
+          RUSTFLAGS: -A mismatched_lifetime_syntaxes
+        run: cargo tarpaulin --locked -p lightyear_tests --engine llvm --out lcov -- --test-threads=1
+
+      - name: Upload code coverage results
+        if: github.actor != 'dependabot[bot]'
+        uses: actions/upload-artifact@v7
+        with:
+          name: code-coverage-report
+          path: lcov.info
+
+      - name: Test doc
+        run: cargo test --locked --workspace --doc --all-features --no-fail-fast
+
+  codecov:
+    name: Upload to Codecov
+    if: github.actor != 'dependabot[bot]'
+    needs: [ test ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v7
+
+      - name: Download code coverage results
+        uses: actions/download-artifact@v8
+        with:
+          name: code-coverage-report
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

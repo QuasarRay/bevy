@@ -1,0 +1,60 @@
+[package]
+name = "aeronet_steam"
+version = "0.21.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Steam networking IO layer implementation for `aeronet`"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg=docsrs_aeronet"]
+
+[[example]]
+name = "steam_client"
+path = "examples/steam_client.rs"
+required-features = ["client"]
+
+[[example]]
+name = "steam_server"
+path = "examples/steam_server.rs"
+required-features = ["server"]
+
+[dependencies]
+aeronet_io = { workspace = true }
+anyhow = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_platform = { workspace = true }
+blocking = { workspace = true }
+bytes = { workspace = true }
+derive_more = { workspace = true, features = [
+  "debug",
+  "deref",
+  "deref_mut",
+  "display",
+  "error",
+] }
+oneshot = { workspace = true }
+sync_wrapper = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bevy = { workspace = true }
+bevy_egui = { workspace = true }
+cfg-if = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+steamworks = { workspace = true }
+
+[features]
+## Enables the `client` module.
+client = []
+## Enables the `server` module.
+server = []
+
+[lints]
+workspace = true

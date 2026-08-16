@@ -19,6 +19,7 @@
 
 # Preserve the exact bytes published in checksum-verified crates.io snapshots.
 editor/jackdaw/vendor/bevy-coupled/avian/** -text
+editor/jackdaw/vendor/bevy-coupled/bevy-egui/** -text
 editor/jackdaw/vendor/bevy-coupled/bevy-enhanced-input/** -text
 editor/jackdaw/vendor/bevy-coupled/bevy-heavy/** -text
 editor/jackdaw/vendor/bevy-coupled/bevy-monitors/** -text

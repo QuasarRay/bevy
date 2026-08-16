@@ -1,0 +1,261 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  toolchain: nightly-2026-07-31
+
+jobs:
+  # Nothing ships unless the end-to-end tier is green: the SDK builds, a game
+  # builds against it, and the runner loads an authored scene.
+  heavy:
+    uses: ./.github/workflows/heavy-tier.yaml
+
+  # A scaffolded project depends on the public jackdaw crates by version.
+  # If those are not on crates.io at the anchored version, every `jd new`
+  # from this release produces a project that cannot resolve, and the
+  # user hits it at their first `cargo run`. Nothing else catches this:
+  # the end-to-end scaffold test builds through the shim's path
+  # dependency, never through the version the template ships.
+  scaffold-resolves:
+    name: Scaffolded projects resolve
+    # After the publish, not before: on a first release the crates are
+    # not on the index until `publish` puts them there, so checking
+    # earlier would fail every time. Running it here turns the publish
+    # into something verified rather than assumed. `always()` so a
+    # publish that no-ops on an already-released version still gets
+    # checked rather than silently skipped.
+    needs: [publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check the anchored jackdaw crates are published
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml \
+            | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+          minor=$(echo "$version" | cut -d. -f1,2)
+          echo "anchored version: $version (minor $minor)"
+          missing=0
+          for crate in jackdaw_runtime jackdaw_extension; do
+            body=$(curl -sSL -H 'User-Agent: jackdaw-release-check' \
+              "https://crates.io/api/v1/crates/$crate" || echo '{}')
+            if ! echo "$body" | jq -e --arg m "$minor" \
+              '.versions // [] | map(select(.num | startswith($m + "."))) | length > 0' \
+              >/dev/null; then
+              echo "::error::$crate has no $minor.x release on crates.io;"\
+                   "projects from \`jd new\` will fail to resolve"
+              missing=1
+            else
+              echo "ok: $crate has a $minor.x release"
+            fi
+          done
+          exit $missing
+
+  # Publishes the crates a scaffolded project depends on. This is what
+  # makes `jd new` produce a project that `cargo run` can resolve; without
+  # it the templates request versions that do not exist on the index.
+  #
+  # The editor crate itself is NOT published: it depends on `bevy_rerecast`
+  # by git, which crates.io rejects. That restriction is the editor's
+  # alone -- nothing in the runtime/extension closure touches it (see the
+  # `publishable-closure` guard below) -- so gating the whole workspace on
+  # it, as this job used to, left every scaffolded project unbuildable.
+  # The editor ships as a downloadable bundle and via `cargo install --git`.
+  publish:
+    name: Publish to crates.io
+    needs: [heavy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.toolchain }}
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Publish the scaffolding closure to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # Every crate must be named: `-p` publishes only what it lists,
+        # not the listed packages' path-dependency closure. Cargo orders
+        # them topologically and waits for index propagation between
+        # them. `tests/publishable_closure.rs` keeps this list equal to
+        # the real closure of jackdaw_runtime + jackdaw_extension, so a
+        # new dependency cannot silently drop out of the release.
+        run: >
+          cargo publish --locked
+          -p jackdaw_api
+          -p jackdaw_api_internal
+          -p jackdaw_api_macros
+          -p jackdaw_avian_integration
+          -p jackdaw_bsn
+          -p jackdaw_camera_rig
+          -p jackdaw_commands
+          -p jackdaw_extension
+          -p jackdaw_feathers
+          -p jackdaw_fuzzy
+          -p jackdaw_geometry
+          -p jackdaw_localization
+          -p jackdaw_panels
+          -p jackdaw_pie_protocol
+          -p jackdaw_project_build
+          -p jackdaw_runtime
+          -p jackdaw_scene_types
+          -p jackdaw_ui
+          -p jackdaw_widgets
+
+  # Downloadable per-platform bundles: the editor, its CLI, the rustc
+  # wrapper, the game runner, the three runtime dylibs, and a relocatable
+  # SDK, all in one archive. A user extracts and runs offline - no bootstrap
+  # compile, no source checkout. Independent of the crates.io publish.
+  binaries:
+    name: Bundle - ${{ matrix.triple }}
+    # Only on the tests. The downloadable bundle is the primary install
+    # path, so it must still ship when the publish is a no-op or fails:
+    # re-running a release whose versions are already on crates.io would
+    # otherwise skip `scaffold-resolves` and upload nothing at all.
+    needs: [heavy]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            # A literal $ORIGIN reaches the linker (single-quoted below so
+            # the shell never expands it): the editor and runner then find
+            # their dylibs beside themselves.
+            rpath: "-C link-arg=-Wl,-rpath,$ORIGIN"
+            archive: tar.zst
+          - os: macos-14
+            triple: aarch64-apple-darwin
+            rpath: "-C link-arg=-Wl,-rpath,@loader_path"
+            archive: tar.zst
+          # macOS Intel (x86_64-apple-darwin) is dropped: the macos-13
+          # runner hangs this bundle build for hours. Apple Silicon
+          # (aarch64) is covered above; re-add Intel if the hang is fixed.
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            # Windows loads DLLs from the executable's directory, so no
+            # rpath. Leaving RUSTFLAGS unset also preserves the rust-lld
+            # linker that .cargo/config.toml selects for the MSVC target.
+            rpath: ""
+            archive: zip
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.toolchain }}
+          targets: ${{ matrix.triple }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bundle-${{ matrix.triple }}
+
+      # The rustc wrapper is a HOST tool (cargo runs it as RUSTC_WRAPPER);
+      # built without --target so it lands in target/release, where the
+      # bundler's SdkPaths looks for it.
+      - name: Build rustc wrapper (host)
+        run: cargo build --release -p jackdaw_rustc_wrapper
+
+      # The root package owns the editor, jd, runner, and installed wrapper.
+      - name: Build installed binaries (target)
+        run: |
+          RPATH='${{ matrix.rpath }}'
+          if [ -n "$RPATH" ]; then export RUSTFLAGS="$RPATH"; fi
+          cargo build --release --target ${{ matrix.triple }} -p jackdaw --features dylib --bins
+
+      - name: Stage the bundle
+        run: cargo xtask bundle --out "dist/jackdaw-${{ matrix.triple }}" --workspace .
+
+      # An archive that is missing a piece installs and then fails at the first
+      # project build, which is how a missing sdk/manifest.txt reached a user.
+      - name: Verify the staged bundle
+        run: |
+          set -euo pipefail
+          root="dist/jackdaw-${{ matrix.triple }}"
+          exe=""
+          if [ "${{ runner.os }}" = "Windows" ]; then exe=".exe"; fi
+          missing=0
+          for f in sdk/manifest.txt Cargo.lock toolchain.txt \
+                   "jackdaw$exe" "jd$exe" "jackdaw-runner$exe" "jackdaw-rustc-wrapper$exe"; do
+            if [ ! -f "$root/$f" ]; then echo "bundle is missing $f"; missing=1; fi
+          done
+          if [ ! -d "$root/sdk/${{ matrix.triple }}" ]; then
+            echo "bundle is missing sdk/${{ matrix.triple }}"; missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then echo "staged bundle is incomplete"; exit 1; fi
+          echo "bundle layout verified"
+
+      # Build a game against the just-built release SDK, the way an installed
+      # user does. JACKDAW_BUNDLE_SMOKE_REQUIRED turns the test's local-only
+      # skip into a hard failure so a broken bundle cannot pass silently.
+      - name: Bundle smoke (game builds against the release SDK)
+        env:
+          JACKDAW_BUNDLE_SMOKE_REQUIRED: "1"
+        run: cargo test --features dylib --target ${{ matrix.triple }} --test bundle_smoke -- --nocapture
+
+      - name: Archive (tar.zst)
+        if: matrix.archive == 'tar.zst'
+        run: tar --zstd -cf "jackdaw-${{ matrix.triple }}.tar.zst" -C dist "jackdaw-${{ matrix.triple }}"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        run: 7z a "jackdaw-${{ matrix.triple }}.zip" "./dist/jackdaw-${{ matrix.triple }}"
+
+      - name: Generate checksum
+        run: openssl dgst -sha256 "jackdaw-${{ matrix.triple }}.${{ matrix.archive }}" > "jackdaw-${{ matrix.triple }}.${{ matrix.archive }}.sha256"
+
+      - name: Attest release archive
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: jackdaw-${{ matrix.triple }}.${{ matrix.archive }}
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            jackdaw-${{ matrix.triple }}.${{ matrix.archive }}
+            jackdaw-${{ matrix.triple }}.${{ matrix.archive }}.sha256

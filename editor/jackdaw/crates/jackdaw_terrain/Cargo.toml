@@ -1,0 +1,15 @@
+[package]
+name = "jackdaw_terrain"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for the jackdaw editor"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[dependencies]
+noise.workspace = true
+rand.workspace = true
+bevy_math = { version = "0.20.0-dev", path = "../../../../crates/bevy_math" }
+
+[lints]
+workspace = true

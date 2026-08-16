@@ -1,0 +1,44 @@
+[package]
+name = "aeronet_replicon"
+version = "0.21.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "`aeronet` backend implementation for `bevy_replicon`"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg=docsrs_aeronet"]
+
+[dependencies]
+aeronet_io = { workspace = true }
+aeronet_transport = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_platform = { workspace = true, features = ["alloc"] }
+bevy_reflect = { workspace = true }
+bevy_replicon = { workspace = true }
+bevy_state = { workspace = true }
+document-features = { workspace = true, optional = true }
+log = { workspace = true }
+
+[dev-dependencies]
+aeronet_channel = { workspace = true }
+bevy = { workspace = true, features = ["debug"] }
+
+[features]
+default = ["std"]
+## Enables support for `bevy_replicon/client`.
+client = ["bevy_replicon/client"]
+## Enable this when generating docs.
+document-features = ["dep:document-features"]
+## Enables support for `bevy_replicon/server`.
+server = ["bevy_replicon/server"]
+## Enables standard library support.
+std = ["aeronet_transport/std"]
+
+[lints]
+workspace = true

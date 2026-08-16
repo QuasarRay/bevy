@@ -1,0 +1,92 @@
+[workspace]
+members = ["crates/*", "examples"]
+resolver = "3"
+exclude = ["./assets/"]
+
+[workspace.package]
+authors = ["Jan Hohenheim <jan@hohenheim.ch>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/janhohenheim/rerecast"
+keywords = ["bevy", "recast", "navmesh", "navigation", "ai"]
+categories = ["game-development"]
+readme = "readme.md"
+
+[workspace.dependencies]
+avian3d = { version = "0.7.0", default-features = false, path = "../avian/packages/avian3d" }
+serde = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+slotmap = { version = "1", default-features = false }
+ehttp = { version = "0.5", default-features = false }
+rfd = "0.15"
+
+# In sync with Bevy
+thiserror = { version = "2", default-features = false }
+wgpu-types = { version = "27", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+glam = { version = "0.33.2", default-features = false, features = ["all-types"] }
+libm = { version = "0.2", default-features = false }
+tracing = { version = "0.1", default-features = false }
+critical-section = { version = "1", default-features = false }
+anyhow = { version = "1", default-features = false }
+
+# Bevy
+## Bevy itself is only used in tests and examples, so we can use the default features.
+bevy = { version = "0.20.0-dev", default-features = true, path = "../../../../.." }
+## Actual crate code should only depend on bevy_ crates with default features disabled.
+bevy_reflect = { version = "0.20.0-dev", default-features = false, features = [
+    "glam",
+], path = "../../../../../crates/bevy_reflect" }
+bevy_app = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_app" }
+bevy_camera = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_camera" }
+bevy_light = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_light" }
+bevy_remote = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_remote" }
+bevy_mesh = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_mesh" }
+bevy_ecs = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_ecs" }
+bevy_render = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_render" }
+bevy_transform = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_transform" }
+bevy_asset = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_asset" }
+bevy_image = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_image" }
+bevy_pbr = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_pbr" }
+bevy_math = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_math" }
+bevy_color = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_color" }
+bevy_derive = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_derive" }
+bevy_platform = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_platform" }
+bevy_tasks = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_tasks" }
+bevy_gizmos = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_gizmos" }
+bevy_material = { version = "0.20.0-dev", default-features = false, path = "../../../../../crates/bevy_material" }
+
+# Workspace crates
+rerecast = { version = "0.3.4", path = "crates/rerecast", default-features = false }
+bevy_rerecast = { version = "0.4.0", path = "crates/bevy_rerecast", default-features = false }
+bevy_rerecast_core = { version = "0.4.1", path = "crates/bevy_rerecast_core", default-features = false }
+bevy_rerecast_editor_integration = { version = "0.4.1", path = "crates/bevy_rerecast_editor_integration", default-features = false }
+avian_rerecast = { version = "0.5", path = "crates/avian_rerecast", default-features = false }
+test_utils = { version = "0.1", path = "crates/test_utils", default-features = false }
+
+# Other stuffs
+bitflags = { version = "2", default-features = false }
+flate2 = { version = "1", default-features = false, features = [
+    "rust_backend",
+] }
+bincode = { version = "2", features = ["serde"], default-features = false }
+bevy_trenchbroom = { version = "0.14.0-dev", git = "https://github.com/Noxmore/bevy_trenchbroom", features = [
+    "avian_f32",
+] }
+approxim = "0.6"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Bevy supplies arguments to systems via dependency injection, so it's natural for systems to
+# request more than 7 arguments, which would undesirably trigger this lint.
+too_many_arguments = "allow"
+# Queries may access many components, which would undesirably trigger this lint.
+type_complexity = "allow"
+# Make sure macros use their standard braces, such as `[]` for `bevy_ecs::children!`.
+nonstandard_macro_braces = "warn"
+# no_std support
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -1,0 +1,19 @@
+[package]
+name = "jackdaw_localization"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for Jackdaw localization"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[features]
+
+[dependencies]
+bevy.workspace = true
+fluent.workspace = true
+fluent_content.workspace = true
+unic-langid.workspace = true
+sys-locale.workspace = true
+
+[lints]
+workspace = true

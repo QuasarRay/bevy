@@ -1,0 +1,290 @@
+use crate::protocol::*;
+use avian2d::prelude::*;
+use bevy::prelude::*;
+use core::hash::{Hash, Hasher};
+use leafwing_input_manager::input_map::InputMap;
+use leafwing_input_manager::prelude::ActionState;
+use lightyear::avian2d::plugin::AvianReplicationMode;
+use lightyear::connection::client_of::ClientOf;
+use lightyear::input::input_buffer::InputBuffer;
+use lightyear::input::leafwing::prelude::LeafwingBuffer;
+use lightyear::prediction::correction::VisualCorrection;
+use lightyear::prelude::*;
+
+pub(crate) const MAX_VELOCITY: f32 = 200.0;
+const WALL_SIZE: f32 = 350.0;
+
+#[derive(Clone)]
+pub struct SharedPlugin;
+
+impl Plugin for SharedPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(ProtocolPlugin);
+        // bundles
+        app.add_systems(Startup, init);
+
+        // physics
+        app.add_plugins(lightyear::avian2d::plugin::LightyearAvianPlugin {
+            replication_mode: AvianReplicationMode::Position,
+            ..default()
+        });
+        app.add_plugins(
+            PhysicsPlugins::default()
+                .build()
+                // disable the position<>transform sync plugins as it is handled by lightyear_avian
+                .disable::<PhysicsTransformPlugin>()
+                .disable::<PhysicsInterpolationPlugin>(),
+        )
+        .insert_resource(Gravity(Vec2::ZERO));
+
+        // app.add_systems(
+        //     FixedPreUpdate,
+        //     #[cfg(not(feature = "client"))]
+        //     emit_fixed_pre_inputs,
+        //     #[cfg(feature = "client")]
+        //     emit_fixed_pre_inputs.after(lightyear::input::client::InputSet::BufferClientInputs),
+        // );
+        app.add_systems(
+            FixedPostUpdate,
+            emit_before_physics.before(PhysicsSystems::StepSimulation),
+        );
+
+        app.add_systems(FixedLast, emit_fixed_last_players);
+        // app.add_systems(Last, emit_last_players);
+
+        app.add_systems(
+            RunFixedMainLoop,
+            emit_fixed_loop_start.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+        );
+    }
+}
+
+pub(crate) fn init(mut commands: Commands) {
+    commands.spawn(WallBundle::new(
+        Vec2::new(-WALL_SIZE, -WALL_SIZE),
+        Vec2::new(-WALL_SIZE, WALL_SIZE),
+        Color::WHITE,
+    ));
+    commands.spawn(WallBundle::new(
+        Vec2::new(-WALL_SIZE, WALL_SIZE),
+        Vec2::new(WALL_SIZE, WALL_SIZE),
+        Color::WHITE,
+    ));
+    commands.spawn(WallBundle::new(
+        Vec2::new(WALL_SIZE, WALL_SIZE),
+        Vec2::new(WALL_SIZE, -WALL_SIZE),
+        Color::WHITE,
+    ));
+    commands.spawn(WallBundle::new(
+        Vec2::new(WALL_SIZE, -WALL_SIZE),
+        Vec2::new(-WALL_SIZE, -WALL_SIZE),
+        Color::WHITE,
+    ));
+}
+
+// Generate pseudo-random color from id
+pub(crate) fn color_from_id(client_id: PeerId) -> Color {
+    let h = (((client_id.to_bits().wrapping_mul(30)) % 360) as f32) / 360.0;
+    let s = 1.0;
+    let l = 0.5;
+    Color::hsl(h, s, l)
+}
+
+// This system defines how we update the player's positions when we receive an input
+pub(crate) fn shared_movement_behaviour(
+    mut velocity: Mut<LinearVelocity>,
+    action: &ActionState<PlayerActions>,
+) {
+    trace!(pressed = ?action.get_pressed(), "shared movement");
+    const MOVE_SPEED: f32 = 10.0;
+    if action.pressed(&PlayerActions::Up) {
+        velocity.y += MOVE_SPEED;
+    }
+    if action.pressed(&PlayerActions::Down) {
+        velocity.y -= MOVE_SPEED;
+    }
+    if action.pressed(&PlayerActions::Left) {
+        velocity.x -= MOVE_SPEED;
+    }
+    if action.pressed(&PlayerActions::Right) {
+        velocity.x += MOVE_SPEED;
+    }
+    *velocity = LinearVelocity(velocity.clamp_length_max(MAX_VELOCITY));
+}
+
+fn emit_fixed_loop_start() {
+    lightyear_debug_event!(
+        DebugCategory::Timeline,
+        DebugSamplePoint::RunFixedMainLoop,
+        "RunFixedMainLoop",
+        "fixed_loop_start",
+        "Fixed Start"
+    );
+}
+
+pub(crate) fn emit_fixed_pre_inputs(
+    timeline: Res<LocalTimeline>,
+    remote_client_inputs: Query<
+        (
+            Entity,
+            &ActionState<PlayerActions>,
+            &LeafwingBuffer<PlayerActions>,
+        ),
+        (Without<InputMap<PlayerActions>>, With<Predicted>),
+    >,
+) {
+    let tick = timeline.tick();
+    for (entity, action_state, buffer) in remote_client_inputs.iter() {
+        let pressed = action_state.get_pressed();
+        lightyear_debug_event!(
+            DebugCategory::Input,
+            DebugSamplePoint::FixedPreUpdate,
+            "FixedPreUpdate",
+            "remote_input_before_fixed_update",
+            tick = ?tick,
+            entity = ?entity,
+            pressed = ?pressed,
+            buffer = %buffer,
+            "Remote client input before FixedUpdate"
+        );
+    }
+}
+
+pub(crate) fn emit_before_physics(
+    timeline: Res<LocalTimeline>,
+    remote_client_inputs: Query<
+        (
+            Entity,
+            &Position,
+            &LinearVelocity,
+            &ActionState<PlayerActions>,
+        ),
+        With<Predicted>,
+    >,
+) {
+    let tick = timeline.tick();
+    for (entity, position, velocity, action_state) in remote_client_inputs.iter() {
+        let pressed = action_state.get_pressed();
+        lightyear_debug_event!(
+            DebugCategory::Component,
+            DebugSamplePoint::FixedUpdateBeforePhysics,
+            "FixedPostUpdate",
+            "player_before_physics",
+            tick = ?tick,
+            entity = ?entity,
+            position = ?position,
+            velocity = ?velocity,
+            pressed = ?pressed,
+            "Client in FixedPostUpdate right before physics"
+        );
+    }
+}
+
+pub(crate) fn emit_fixed_last_players(
+    timeline: Res<LocalTimeline>,
+    players: Query<
+        (
+            Entity,
+            &Position,
+            &LinearVelocity,
+            Option<&VisualCorrection<Position>>,
+            Option<&ActionState<PlayerActions>>,
+            Option<&LeafwingBuffer<PlayerActions>>,
+        ),
+        (Without<BallMarker>, With<PlayerId>),
+    >,
+    ball: Query<(&Position, Option<&VisualCorrection<Position>>), With<BallMarker>>,
+) {
+    let tick = timeline.tick();
+
+    for (entity, position, velocity, correction, action_state, input_buffer) in players.iter() {
+        let pressed = action_state.map(|a| a.get_pressed());
+        let last_buffer_tick = input_buffer.and_then(|b| b.get_last_with_tick().map(|(t, _)| t));
+        lightyear_debug_event!(
+            DebugCategory::Component,
+            DebugSamplePoint::FixedLast,
+            "FixedLast",
+            "player_after_physics",
+            tick = ?tick,
+            entity = ?entity,
+            position = ?position,
+            velocity = ?velocity,
+            correction = ?correction,
+            pressed = ?pressed,
+            last_buffer_tick = ?last_buffer_tick,
+            "Player after physics update"
+        );
+    }
+    // for (position, correction) in ball.iter() {
+    //     info!(?tick, ?position, ?correction, "Ball after physics update");
+    // }
+}
+
+pub(crate) fn emit_last_players(
+    timeline: Res<LocalTimeline>,
+    players: Query<
+        (
+            Entity,
+            &Position,
+            Option<&VisualCorrection<Position>>,
+            Option<&ActionState<PlayerActions>>,
+            Option<&LeafwingBuffer<PlayerActions>>,
+        ),
+        (Without<BallMarker>, With<PlayerId>),
+    >,
+    ball: Query<(&Position, Option<&VisualCorrection<Position>>), With<BallMarker>>,
+) {
+    let tick = timeline.tick();
+
+    for (entity, position, correction, action_state, input_buffer) in players.iter() {
+        let pressed = action_state.map(|a| a.get_pressed());
+        let last_buffer_tick = input_buffer.and_then(|b| b.get_last_with_tick().map(|(t, _)| t));
+        lightyear_debug_event!(
+            DebugCategory::Component,
+            DebugSamplePoint::Last,
+            "Last",
+            "player_after_physics_last",
+            tick = ?tick,
+            entity = ?entity,
+            position = ?position,
+            correction = ?correction,
+            pressed = ?pressed,
+            last_buffer_tick = ?last_buffer_tick,
+            "Player after physics update"
+        );
+    }
+    // for (position, correction) in ball.iter() {
+    //     info!(?tick, ?position, ?correction, "Ball after physics update");
+    // }
+}
+
+// Wall
+#[derive(Bundle)]
+pub(crate) struct WallBundle {
+    color: ColorComponent,
+    physics: PhysicsBundle,
+    wall: Wall,
+    name: Name,
+}
+
+#[derive(Component)]
+pub(crate) struct Wall {
+    pub(crate) start: Vec2,
+    pub(crate) end: Vec2,
+}
+
+impl WallBundle {
+    pub(crate) fn new(start: Vec2, end: Vec2, color: Color) -> Self {
+        Self {
+            color: ColorComponent(color),
+            physics: PhysicsBundle {
+                collider: Collider::segment(start, end),
+                collider_density: ColliderDensity(1.0),
+                rigid_body: RigidBody::Static,
+                restitution: Restitution::new(0.0),
+            },
+            wall: Wall { start, end },
+            name: Name::from("Wall"),
+        }
+    }
+}

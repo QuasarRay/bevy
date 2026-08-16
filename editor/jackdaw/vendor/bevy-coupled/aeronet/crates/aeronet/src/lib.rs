@@ -1,0 +1,32 @@
+#![cfg_attr(docsrs_aeronet, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
+//!
+//! ## Feature flags
+#![cfg_attr(feature = "document-features", doc = document_features::document_features!())]
+
+use bevy_app::{PluginGroupBuilder, prelude::*};
+pub use {aeronet_io as io, aeronet_transport as transport};
+
+/// Adds the default networking plugins.
+///
+/// # Plugins
+///
+/// - [`io::AeronetIoPlugin`]
+/// - [`transport::AeronetTransportPlugin`]
+pub struct AeronetPlugins;
+
+impl PluginGroup for AeronetPlugins {
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::start::<Self>()
+            .add(io::AeronetIoPlugin)
+            .add(transport::AeronetTransportPlugin)
+    }
+}
+
+/// Long-form documentation.
+pub mod _docs {
+    #[doc = include_str!("../docs/design.md")]
+    pub mod design {}
+    #[doc = include_str!("../docs/changelog.md")]
+    pub mod changelog {}
+}

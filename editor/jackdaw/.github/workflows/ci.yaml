@@ -1,0 +1,408 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Use the same Rust toolchain across jobs so they can share a cache.
+  # Keep this in sync with https://github.com/TheBevyFlock/bevy_cli/blob/main/rust-toolchain.toml
+  toolchain: nightly-2026-07-31
+
+jobs:
+  # Run tests.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Remove unused software
+        run: |
+          echo "Available storage before:"
+          sudo df -h
+          echo
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          echo "Available storage after:"
+          sudo df -h
+          echo
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustc-codegen-cranelift-preview, rustfmt, clippy
+          toolchain: ${{ env.toolchain }}
+      - name: Set LD_LIBRARY_PATH
+        run: |
+          echo "LD_LIBRARY_PATH=$(rustc --print target-libdir)" >> $GITHUB_ENV
+
+      - name: Populate target directory from cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-directories: ${{ env.LD_LIBRARY_PATH }}
+          shared-key: tests
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Fast tier (fmt, clippy, lib tests)
+        run: cargo xtask fast
+
+      - name: Integration tier
+        run: cargo xtask integration
+
+      # The create/import flows as a user meets them: the `jd` binary
+      # run from outside any checkout, with only its embedded templates.
+      # Required here, so a binary that cannot scaffold fails CI instead
+      # of skipping quietly.
+      - name: Standalone scaffold and import
+        env:
+          JACKDAW_STANDALONE_REQUIRED: "1"
+        run: cargo test --locked --test standalone_scaffold
+
+      # The recipe is only unpacked on a user's machine at first run, so
+      # a malformed one passes every other check and then leaves them
+      # with no SDK and no way to build any project.
+      - name: Embedded SDK recipe is loadable
+        env:
+          JACKDAW_RECIPE_REQUIRED: "1"
+        run: cargo test --locked --test sdk_recipe
+
+      # An SDK prepared from that recipe is built from a narrower package
+      # selection than the editor, so cargo resolves it fewer features.
+      # Where a project resolves more, it compiles against SDK rlibs
+      # built without them and fails on a crate the user never named.
+      # Every other SDK test here links the dev checkout's SDK, whose
+      # selection is the whole editor and hides this entirely.
+      - name: SDK features cover a project's
+        env:
+          JACKDAW_FEATURE_SUPERSET_REQUIRED: "1"
+        run: cargo test --locked --features dylib --test sdk_feature_superset -- --nocapture
+
+      - name: Run doctests
+        run: cargo test --locked --workspace --doc --features bevy/dynamic_linking
+
+  # The Windows dylib smoke job that previously ran here is removed
+  # while the dylib path is experimental. Re-add when the dylib flow
+  # is stable enough to gate PRs on.
+
+  # Scaffold each shipping template via `cargo generate` and run
+  # `cargo check` to catch template regressions: missing/renamed
+  # deps, stale API usage in main.rs/lib.rs, broken Cargo.toml
+  # syntax, etc. Modeled after bevy_new_2d's template CI: one job
+  # per template via matrix so each template gets its own CI line
+  # and failures don't cascade. The scaffolded project's `jackdaw`
+  # and `jackdaw_runtime` deps are patched to point at the
+  # workspace checkout under test so we exercise THIS PR's runtime
+  # against THIS PR's templates instead of whatever happens to be
+  # on `main`.
+  templates:
+    name: Template - ${{ matrix.template }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        template:
+          - game
+          - extension
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustc-codegen-cranelift-preview, rustfmt, clippy
+          toolchain: ${{ env.toolchain }}
+
+      - name: Set LD_LIBRARY_PATH
+        run: echo "LD_LIBRARY_PATH=$(rustc --print target-libdir)" >> $GITHUB_ENV
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Install nextest
+        run: cargo binstall cargo-nextest --locked --force
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Populate target directory from cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-directories: ${{ env.LD_LIBRARY_PATH }}
+          shared-key: template
+
+      - name: Scaffold ${{ matrix.template }}
+        run: |
+          set -euxo pipefail
+          checkout="$GITHUB_WORKSPACE"
+          template="${{ matrix.template }}"
+          # `jd new` normalises the name to a cargo-legal one, so use a
+          # form it will not rewrite or the destination path stops matching.
+          name="test-$template"
+          dest="$RUNNER_TEMP/$name"
+          rm -rf "$dest"
+          # Scaffold with the shipped binary rather than reimplementing
+          # it here. The hand-rolled copy substituted four placeholders
+          # and silently stopped matching the real one when version
+          # pinning added three more, leaving `bevy = "{{bevy_version}}"`
+          # in the manifest. Using `jd new` means this job tests what a
+          # user actually gets, and cannot drift again.
+          cargo build --bin jd
+          extra=""
+          if [ "$template" = "extension" ]; then extra="--extension"; fi
+          "$checkout/target/debug/jd" new "$name" --path "$RUNNER_TEMP" --no-git $extra
+          cp -r "$checkout/.cargo" "$RUNNER_TEMP/"
+          # Pin the scaffolded project's jackdaw deps to THIS checkout
+          # so the template is tested against the PR under review.
+          cat >> "$dest/Cargo.toml" <<EOF
+
+          [patch.crates-io]
+          jackdaw_runtime = { path = "$checkout/crates/jackdaw_runtime" }
+          jackdaw_extension = { path = "$checkout/crates/jackdaw_extension" }
+          jackdaw_api = { path = "$checkout/crates/jackdaw_api" }
+          jackdaw_api_internal = { path = "$checkout/crates/jackdaw_api_internal" }
+          EOF
+
+      - name: Run cargo fmt
+        run: |
+          set -euxo pipefail
+          name="test-${{ matrix.template }}"
+          cd "$RUNNER_TEMP/$name"
+          cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        # No `--locked`: cargo-generate doesn't ship a Cargo.lock,
+        # and the patched jackdaw deps would mismatch one anyway.
+        run: |
+          set -euxo pipefail
+          name="test-${{ matrix.template }}"
+          cd "$RUNNER_TEMP/$name"
+          cargo clippy --workspace --all-targets --target-dir "$GITHUB_WORKSPACE/target" --features bevy/dynamic_linking -- --deny warnings
+
+      - name: Run tests
+        run: |
+          set -euxo pipefail
+          name="test-${{ matrix.template }}"
+          cd "$RUNNER_TEMP/$name"
+          if [[ -d tests ]]; then
+            cargo nextest run --workspace --lib --bins --tests --no-fail-fast --no-tests warn --features bevy/dynamic_linking --target-dir "$GITHUB_WORKSPACE/target"
+          else
+            echo "no tests/ directory in scaffolded ${{ matrix.template }}; skipping"
+          fi
+
+  # Run clippy lints.
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: clippy, rustc-codegen-cranelift-preview
+          toolchain: ${{ env.toolchain }}
+
+      - name: Set LD_LIBRARY_PATH
+        run: echo "LD_LIBRARY_PATH=$(rustc --print target-libdir)" >> $GITHUB_ENV
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Populate target directory from cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+          cache-directories: ${{ env.LD_LIBRARY_PATH }}
+          shared-key: lints
+
+      - name: Run clippy lints
+        run: cargo clippy --locked --workspace --all-targets --features dylib -- --deny warnings
+
+  # Check formatting.
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustfmt
+          toolchain: ${{ env.toolchain }}
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+  # The command shown in the installation guide must keep selecting one
+  # package and producing every public executable. Use a local path here so
+  # pull requests test their own commit without a network race against main.
+  cargo-install:
+    name: Cargo install contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.toolchain }}
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Install the public package
+        run: cargo install --path . --locked --root "$RUNNER_TEMP/jackdaw-install"
+
+      - name: Verify installed commands
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/jackdaw-install/bin"
+          for command in jackdaw jd jackdaw-runner jackdaw-rustc-wrapper; do
+            test -x "$root/$command"
+          done
+          "$root/jd" --version
+          "$root/jackdaw" --version
+
+  # Check documentation.
+  doc:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustc-codegen-cranelift-preview
+          toolchain: ${{ env.toolchain }}
+
+      - name: Set LD_LIBRARY_PATH
+        run: echo "LD_LIBRARY_PATH=$(rustc --print target-libdir)" >> $GITHUB_ENV
+
+      - name: Activate CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Populate target directory from cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+          cache-directories: ${{ env.LD_LIBRARY_PATH }}
+          shared-key: lints
+
+      - name: Check documentation
+        run: cargo doc --locked --workspace --document-private-items --no-deps
+
+  # Run Bevy lints.
+  bevy-lint:
+    name: Bevy linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustc-codegen-cranelift-preview, rustc-dev, llvm-tools-preview
+          toolchain: ${{ env.toolchain }}
+
+      - name: Install dependencies
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Populate target directory from cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-directories: ${{ env.LD_LIBRARY_PATH }}
+          shared-key: lints
+
+      - name: Install Bevy linter
+        # Pinned to a known-good commit: installing from a release tag requires that
+        # release's exact nightly, while unpinned HEAD lets upstream regressions
+        # break CI without any code change in this repo.
+        run: cargo install --git https://github.com/TheBevyFlock/bevy_cli --rev 6e65200ca13b89c212499324513248db46d0edc7 --locked bevy_lint
+
+      - name: Add cranelift to rustc
+        run: rustup component add rustc-codegen-cranelift-preview --toolchain ${{ env.toolchain }}
+
+      - name: Active CI cargo config
+        run: mv .cargo/config_ci.toml .cargo/config.toml
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Wild
+        run: cargo binstall wild-linker --locked --force
+
+      - name: Run Bevy linter
+        run: bevy_lint --locked --workspace --all-targets --features bevy/dynamic_linking

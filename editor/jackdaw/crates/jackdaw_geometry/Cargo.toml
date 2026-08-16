@@ -1,0 +1,42 @@
+[package]
+name = "jackdaw_geometry"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for the jackdaw editor"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[dependencies]
+glam.workspace = true
+bevy = { version = "0.20.0-dev", default-features = false, optional = true, features = [
+    "reflect_auto_register",
+    "std",
+    "serialize",
+    "bevy_asset",
+], path = "../../../.." }
+slotmap = "1.0"
+earcutr = "0.5"
+cdt = "0.1"
+bitflags = "2"
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+glam.workspace = true
+# Deliberately version-less. `jackdaw_scene_types` depends on this crate,
+# so a version here would make the cycle real to crates.io and neither
+# could publish. Cargo drops a dev-dependency that states no version from
+# the published manifest, which breaks the cycle at the registry boundary
+# while keeping it usable for these tests.
+jackdaw_scene_types = { path = "../jackdaw_scene_types", default-features = false }
+serde_json = { workspace = true }
+
+[features]
+default = ["render"]
+# `render` is the full Bevy-facing build used by the editor: reflection, ECS
+# component derives, and StandardMaterial handles on faces. The engine-agnostic
+# core consumed by the Godot binding is the `--no-default-features` build:
+# glam + serde only, String materials, no derives.
+render = ["dep:bevy", "bevy/bevy_pbr", "bevy/bevy_render"]
+
+[lints]
+workspace = true

@@ -1,0 +1,106 @@
+//! Server-side WebSocket transport integration.
+//!
+//! [`WebSocketServerIo`](crate::server::WebSocketServerIo) is inserted on a Lightyear server entity.
+//! When [`LinkStart`](lightyear_link::LinkStart) is triggered, the plugin spawns an Aeronet
+//! WebSocket server entity and relates it back to the Lightyear server. Each accepted Aeronet
+//! session receives its own child Lightyear [`Link`](lightyear_link::Link) through
+//! [`LinkOf`](lightyear_link::prelude::LinkOf).
+
+use crate::WebSocketError;
+use aeronet_io::Session;
+use aeronet_io::connection::{LocalAddr, PeerAddr};
+pub use aeronet_websocket::server::{
+    Identity, ServerConfig, WebSocketServer, WebSocketServerClient,
+};
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::*;
+use lightyear_aeronet::server::ServerAeronetPlugin;
+use lightyear_aeronet::{AeronetLinkOf, AeronetPlugin};
+use lightyear_link::prelude::LinkOf;
+use lightyear_link::server::Server;
+use lightyear_link::{Link, LinkStart, Linked, Linking};
+use tracing::info;
+
+/// Plugin that starts WebSocket servers and creates per-client Lightyear links.
+///
+/// The plugin installs [`AeronetPlugin`], [`ServerAeronetPlugin`], and Aeronet's WebSocket server
+/// plugin. It observes [`LinkStart`] for [`WebSocketServerIo`] entities and observes new Aeronet
+/// sessions to create the corresponding child [`Link`] entities.
+pub struct WebSocketServerPlugin;
+
+impl Plugin for WebSocketServerPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<AeronetPlugin>() {
+            app.add_plugins(AeronetPlugin);
+        }
+        if !app.is_plugin_added::<ServerAeronetPlugin>() {
+            app.add_plugins(ServerAeronetPlugin);
+        }
+        app.add_plugins(aeronet_websocket::server::WebSocketServerPlugin);
+
+        app.add_observer(Self::link);
+        app.add_observer(Self::on_connection);
+    }
+}
+
+/// Lightyear component for a WebSocket server endpoint.
+///
+/// Insert this on a Lightyear server entity. A [`LocalAddr`] must be present when [`LinkStart`] is
+/// triggered; the plugin opens an Aeronet [`WebSocketServer`] using [`config`](Self::config).
+///
+/// Accepted clients are represented as child Lightyear link entities related to the server through
+/// [`LinkOf`].
+#[derive(Component)]
+#[require(Server)]
+pub struct WebSocketServerIo {
+    /// Aeronet WebSocket server configuration used when opening the server.
+    pub config: ServerConfig,
+}
+
+impl WebSocketServerPlugin {
+    fn link(
+        trigger: On<LinkStart>,
+        query: Query<
+            (Entity, &WebSocketServerIo, Option<&LocalAddr>),
+            (Without<Linking>, Without<Linked>),
+        >,
+        mut commands: Commands,
+    ) -> Result {
+        if let Ok((entity, io, local_addr)) = query.get(trigger.entity) {
+            let server_addr = local_addr.ok_or(WebSocketError::LocalAddrMissing)?.0;
+            let config = io.config.clone();
+            commands.queue(move |world: &mut World| {
+                info!("Server WebSocket starting at {}", server_addr);
+                let child = world.spawn((AeronetLinkOf(entity), Name::from("WebSocketServer")));
+                WebSocketServer::open(config).apply(child);
+            });
+        }
+        Ok(())
+    }
+
+    // TODO: should also add on_connecting? Or maybe it's handled automatically
+    //  because the connecting entity adds SessionEndpoint? (and lightyear_aeronet handles that)
+    fn on_connection(
+        trigger: On<Add, Session>,
+        query: Query<&AeronetLinkOf>,
+        child_query: Query<(&ChildOf, &PeerAddr), With<WebSocketServerClient>>,
+        mut commands: Commands,
+    ) {
+        if let Ok((child_of, peer_addr)) = child_query.get(trigger.entity)
+            && let Ok(server_link) = query.get(child_of.parent())
+        {
+            let link_entity = commands
+                .spawn((
+                    LinkOf {
+                        server: server_link.0,
+                    },
+                    Link::new(None),
+                    PeerAddr(peer_addr.0),
+                ))
+                .id();
+            commands
+                .entity(trigger.entity)
+                .insert((AeronetLinkOf(link_entity), Name::from("WebSocketClientOf")));
+        }
+    }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "jackdaw_avian_integration"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for the jackdaw editor"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[dependencies]
+bevy.workspace = true
+avian3d = { workspace = true }
+jackdaw_geometry = { version = "0.20.0-dev", path = "../jackdaw_geometry" }
+jackdaw_scene_types = { version = "0.20.0-dev", path = "../jackdaw_scene_types" }
+
+[features]
+default = ["overlays"]
+# Editor-only collider/sensor wireframe gizmos and hierarchy arrows. Pulls
+# avian's `debug-plugin` (`PhysicsGizmoExt::draw_collider`, the `PhysicsGizmos`
+# config group). The runtime collider bridge builds without it.
+overlays = ["avian3d/debug-plugin"]
+
+[lints]
+workspace = true
