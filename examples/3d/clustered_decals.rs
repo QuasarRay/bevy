@@ -35,7 +35,7 @@ use number_input_f32::number_input_f32;
 
 /// The custom material shader that we use to demonstrate how to use the decal
 /// `tag` field.
-const SHADER_ASSET_PATH: &str = "shaders/custom_clustered_decal.wgsl";
+const SHADER_ASSET_PATH: &str = "shaders/custom_clustered_decal.wesl";
 
 /// The speed at which the cube rotates, in radians per frame.
 const CUBE_ROTATION_SPEED: f32 = 0.02;
@@ -404,7 +404,7 @@ fn rotate_cube(mut meshes: Query<&mut Transform, With<Mesh3d>>) {
 
 /// Process a drag event that moves the selected object.
 fn handle_drag_as_movement(
-    event: On<Pointer<Drag>>,
+    event: On<PointerDrag>,
     parent_q: Query<&ChildOf>,
     number_input_q: Query<(), With<FeathersNumberInput>>,
     mut selections: Query<(&mut Transform, &Selection)>,
