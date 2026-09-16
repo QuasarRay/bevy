@@ -1,0 +1,21 @@
+[package]
+name = "jackdaw_rustc_wrapper"
+version.workspace = true
+edition = "2024"
+description = "Thin rustc interceptor that redirects --extern bevy= to libjackdaw_sdk.so when compiling jackdaw extension/game projects. Invoked via .cargo/config.toml build.rustc-wrapper in scaffolded projects."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "jackdaw-rustc-wrapper"
+path = "src/main.rs"
+
+[dependencies]
+tracing-subscriber.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

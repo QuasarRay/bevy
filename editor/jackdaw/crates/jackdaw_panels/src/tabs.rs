@@ -1,0 +1,320 @@
+use bevy::picking::hover::Hovered;
+use bevy::prelude::*;
+use bevy::ui_widgets::{Activate, ActivateOnPress, Button};
+use jackdaw_feathers::{icons::IconFont, tokens};
+use lucide_icons::Icon;
+
+use crate::area::{DockTab, DockTabBar};
+use crate::reconcile::LeafBinding;
+use crate::tree::{DockTree, TabId};
+
+#[derive(Component)]
+pub struct DockTabAddButton {
+    pub area_entity: Entity,
+}
+
+#[derive(Component)]
+pub struct DockTabGrip;
+
+#[derive(Component)]
+pub struct DockTabRow;
+
+pub struct DockTabPlugin;
+
+impl Plugin for DockTabPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(handle_dock_tab_clicks)
+            .add_systems(Update, show_close_on_hover);
+    }
+}
+
+pub fn spawn_tab_bar_world(
+    world: &mut World,
+    area_entity: Entity,
+    tabs: &[(TabId, String, String)],
+) {
+    let first_tab = tabs.first().map(|(id, _, _)| *id);
+
+    let tab_bar = world
+        .spawn((
+            DockTabBar,
+            Node {
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                width: Val::Percent(100.0),
+                height: Val::Px(tokens::PANEL_TAB_HEIGHT),
+                padding: UiRect::new(
+                    Val::Px(tokens::SPACING_MD),
+                    Val::Px(tokens::SPACING_MD),
+                    Val::Px(1.0),
+                    Val::ZERO,
+                ),
+                flex_shrink: 0.0,
+                border: UiRect {
+                    left: Val::Px(1.0),
+                    right: Val::Px(1.0),
+                    top: Val::Px(1.0),
+                    bottom: Val::ZERO,
+                },
+                border_radius: BorderRadius::top(Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(tokens::PANEL_HEADER_BG),
+            BorderColor::all(tokens::PANEL_BORDER),
+            ChildOf(area_entity),
+        ))
+        .id();
+
+    let tab_row = world
+        .spawn((
+            DockTabRow,
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(tokens::SPACING_XS),
+                height: Val::Percent(100.0),
+                overflow: Overflow::scroll_x(),
+                flex_shrink: 1.0,
+                min_width: Val::Px(0.0),
+                ..default()
+            },
+            ScrollPosition::default(),
+            ChildOf(tab_bar),
+        ))
+        .id();
+
+    for (tab_id, window_id, label) in tabs {
+        let is_active = Some(*tab_id) == first_tab;
+        spawn_tab(world, tab_row, *tab_id, window_id, label, is_active);
+    }
+
+    let icon_font = world.get_resource::<IconFont>().map(|f| f.0.clone());
+
+    let right_row = world
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(tokens::SPACING_SM),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ChildOf(tab_bar),
+        ))
+        .id();
+
+    if let Some(ref font_handle) = icon_font {
+        world.spawn((
+            DockTabAddButton { area_entity },
+            Node {
+                width: Val::Px(15.0),
+                height: Val::Px(15.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ChildOf(right_row),
+            children![(
+                Text::new(String::from(Icon::Plus.unicode())),
+                TextFont {
+                    font: font_handle.clone().into(),
+                    font_size: tokens::ICON_SM,
+                    ..default()
+                },
+                TextColor(tokens::TAB_INACTIVE_TEXT),
+            )],
+        ));
+
+        world.spawn((
+            DockTabGrip,
+            Node {
+                width: Val::Px(15.0),
+                height: Val::Px(15.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ChildOf(right_row),
+            children![(
+                Text::new(String::from(Icon::GripVertical.unicode())),
+                TextFont {
+                    font: font_handle.clone().into(),
+                    font_size: tokens::ICON_SM,
+                    ..default()
+                },
+                TextColor(tokens::TAB_INACTIVE_TEXT),
+            )],
+        ));
+    }
+}
+
+pub fn spawn_tab_in_world(
+    world: &mut World,
+    tab_row: Entity,
+    tab_id: TabId,
+    window_id: &str,
+    label: &str,
+    is_active: bool,
+) {
+    spawn_tab(world, tab_row, tab_id, window_id, label, is_active);
+}
+
+fn spawn_tab(
+    world: &mut World,
+    tab_row: Entity,
+    tab_id: TabId,
+    window_id: &str,
+    label: &str,
+    is_active: bool,
+) {
+    let tab_bg = if is_active {
+        tokens::TAB_ACTIVE_BG
+    } else {
+        Color::NONE
+    };
+    let border_top = if is_active { Val::Px(2.0) } else { Val::ZERO };
+    let border_color = if is_active {
+        tokens::TAB_ACTIVE_BORDER
+    } else {
+        Color::NONE
+    };
+    let text_color = if is_active {
+        tokens::TEXT_PRIMARY
+    } else {
+        tokens::TAB_INACTIVE_TEXT
+    };
+
+    let tab_entity = world
+        .spawn((
+            DockTab {
+                window_id: window_id.to_string(),
+                tab_id,
+            },
+            Button,
+            ActivateOnPress,
+            Hovered::default(),
+            Node {
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(tokens::SPACING_XS),
+                padding: UiRect::horizontal(Val::Px(8.0)),
+                height: Val::Percent(100.0),
+                flex_shrink: 0.0,
+                border: UiRect {
+                    top: border_top,
+                    ..default()
+                },
+                border_radius: BorderRadius::top(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(tab_bg),
+            BorderColor::all(border_color),
+            ChildOf(tab_row),
+        ))
+        .id();
+
+    world.spawn((
+        Text::new(label.to_string()),
+        TextLayout::linebreak(LineBreak::NoWrap),
+        TextFont {
+            font_size: tokens::TEXT_SIZE_LG,
+            ..default()
+        },
+        TextColor(text_color),
+        ChildOf(tab_entity),
+    ));
+
+    let icon_font = world.get_resource::<IconFont>().map(|f| f.0.clone());
+
+    if let Some(font_handle) = icon_font {
+        // Close-button slot always reserves its 14x14 layout space so
+        // the tab doesn't reflow on hover. The `X` glyph inside is
+        // alpha-toggled by `show_close_on_hover`.
+        world.spawn((
+            crate::area::DockTabCloseButton {
+                window_id: window_id.to_string(),
+                tab_id,
+            },
+            Button,
+            Node {
+                width: Val::Px(14.0),
+                height: Val::Px(14.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(2.0)),
+                ..default()
+            },
+            ChildOf(tab_entity),
+            children![(
+                DockTabCloseIcon,
+                Text::new(String::from(Icon::X.unicode())),
+                TextFont {
+                    font: font_handle.into(),
+                    font_size: jackdaw_feathers::tokens::TEXT_SIZE_XS,
+                    ..default()
+                },
+                TextColor(tokens::TAB_INACTIVE_TEXT.with_alpha(0.0)),
+            )],
+        ));
+    }
+}
+
+/// Marker on the inner `X` glyph of a dock tab close button so the
+/// hover system can fade it in / out without reflowing the tab.
+#[derive(Component)]
+pub struct DockTabCloseIcon;
+
+fn handle_dock_tab_clicks(
+    activate: On<Activate>,
+    tab_query: Query<(&DockTab, &ChildOf)>,
+    parent_query: Query<&ChildOf>,
+    bindings: Query<&LeafBinding>,
+    mut tree: ResMut<DockTree>,
+) {
+    let Ok((tab, tab_child_of)) = tab_query.get(activate.event_target()) else {
+        return;
+    };
+
+    // Walk: tab -> tab_row -> tab_bar -> area
+    let tab_row = tab_child_of.parent();
+    let Ok(row_parent) = parent_query.get(tab_row) else {
+        return;
+    };
+    let tab_bar = row_parent.parent();
+    let Ok(bar_parent) = parent_query.get(tab_bar) else {
+        return;
+    };
+    let area_entity = bar_parent.parent();
+
+    let Ok(binding) = bindings.get(area_entity) else {
+        return;
+    };
+
+    tree.set_active(binding.0, tab.tab_id);
+}
+
+fn show_close_on_hover(
+    tabs: Query<(&Hovered, &Children), (Changed<Hovered>, With<DockTab>)>,
+    drag_state: Option<Res<crate::drag::DockDragState>>,
+    close_buttons: Query<&Children, With<crate::area::DockTabCloseButton>>,
+    mut icon_colors: Query<&mut TextColor, With<DockTabCloseIcon>>,
+) {
+    let hide = drag_state.is_none_or(|s| matches!(*s, crate::drag::DockDragState::Dragging { .. }));
+
+    for (hovered, children) in tabs.iter() {
+        let show = hovered.get() && !hide;
+        let alpha = if show { 1.0 } else { 0.0 };
+        for child in children.iter() {
+            let Ok(close_children) = close_buttons.get(child) else {
+                continue;
+            };
+            for grandchild in close_children.iter() {
+                if let Ok(mut tc) = icon_colors.get_mut(grandchild) {
+                    tc.0 = tc.0.with_alpha(alpha);
+                }
+            }
+        }
+    }
+}

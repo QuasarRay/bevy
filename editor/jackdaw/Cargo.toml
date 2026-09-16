@@ -1,0 +1,499 @@
+[package]
+name = "jackdaw"
+version.workspace = true
+edition = "2024"
+description = "A 3D level editor built with Bevy"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+readme = "README.md"
+keywords = ["bevy", "editor", "3d", "level-editor"]
+categories = ["game-development", "graphics"]
+# Ship only what the published crate needs: library source, the
+# assets referenced by `embedded_asset!` (env maps + grid texture),
+# manifest, license, README, templates, and small logos. Everything else
+# in the repo (book/, docs/,
+# demo assets in `assets/jan/`, `assets/models/`, etc.) is for
+# source-checkout development and stays out of the .crate so it fits
+# under crates.io's 10 MiB upload limit.
+include = [
+    "src/**/*.rs",
+    "templates/**/*",
+    "assets/environment_maps/**/*",
+    "assets/logo/jackdaw_icon_small.png",
+    "assets/logo/jackdaw_icon_pride_small.png",
+    "assets/textures/jd_grid.png",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+# The package now ships two binaries: `jackdaw` (the editor) and
+# `jackdaw-rustc-wrapper` (the rustc interceptor used by scaffolded
+# dylib projects). `default-run` makes `cargo run` resolve to the
+# editor without an explicit `--bin` flag; the wrapper still builds
+# alongside via `cargo build` and is installed by `cargo install`.
+default-run = "jackdaw"
+
+[features]
+# Source and `cargo install` builds are self-contained by default.
+# Cargo only installs executables, so enabling Bevy's dynamic-linking
+# feature here would leave the installed editor without its required
+# SDK dylib. Release builds explicitly enable `dylib` after staging the
+# matching SDK beside the editor.
+default = ["multiplayer", "camera_rig", "embed-recipe"]
+# Bundles the editor-only networking authoring extension into the
+# editor: registers the proxy reflection types (`Replication`,
+# `NetworkRoom`) plus the user-toggleable networking extension. The
+# editor authors networking metadata only - no lightyear is compiled
+# into the editor; the lightyear backend lives game-side. On by
+# default; opt out with `--no-default-features` for a slimmer build.
+multiplayer = ["dep:jackdaw_multiplayer", "dep:jackdaw_multiplayer_editor"]
+camera_rig = ["dep:jackdaw_camera_rig"]
+# The SDK-backed project flow: enables Bevy's `dynamic_linking` plus
+# `jackdaw_sdk`, the proxy dylib that project builds link against via
+# `--extern bevy=libjackdaw_sdk.{so,dll,dylib}`, so the editor and
+# every loaded project dylib share one compiled copy of every type
+# that crosses the boundary. Off by default only because linking the
+# SDK dylib slows plain dev builds; release editor builds enable it.
+#
+# Windows builds route through `rust-lld` via `.cargo/config.toml`
+# so the SDK proxy clears MSVC's 65,535 PE export cap when this
+# feature is enabled. Build with CARGO_INCREMENTAL=0: incremental
+# codegen leaves undefined hidden anon constants across the dylib
+# boundary at link time.
+dylib = ["dep:jackdaw_sdk", "jackdaw_api/dynamic_linking", "jackdaw_project_build/reflect"]
+# Bake the SDK-builder recipe into the editor binary so a self-contained
+# Cargo install can build its SDK on first launch (the first-run setup
+# screen). Enabled by default; release bundles already carry a built SDK.
+embed-recipe = ["jackdaw_project_build/embed-recipe"]
+# The prebuilt game runner: dlopens a project dylib built through the
+# SDK pipeline and runs it over the PIE link with zero play-time
+# compilation.
+runner = ["dylib", "jackdaw_runtime/pie", "dep:libloading"]
+
+[workspace]
+members = [
+    "crates/*",
+    "examples/extension/dynamic_extension",
+    "examples/extension/viewable_camera_extension",
+    "tests/fixtures/test_fixture_extension",
+]
+exclude = [
+    "vendor/bevy-coupled/aeronet",
+    "vendor/bevy-coupled/avian/packages/avian2d",
+    "vendor/bevy-coupled/avian/packages/avian3d",
+    "vendor/bevy-coupled/bevy-egui",
+    "vendor/bevy-coupled/bevy-enhanced-input",
+    "vendor/bevy-coupled/bevy-heavy",
+    "vendor/bevy-coupled/bevy-monitors",
+    "vendor/bevy-coupled/bevy-replicon",
+    "vendor/bevy-coupled/bevy-transform-interpolation",
+    "vendor/bevy-coupled/glam-matrix-extras",
+    "vendor/bevy-coupled/leafwing-input-manager",
+    "vendor/bevy-coupled/lightyear",
+    "vendor/bevy-coupled/rerecast",
+]
+
+[dependencies]
+bevy.workspace = true
+jackdaw_jsn.workspace = true
+jackdaw_bsn.workspace = true
+jackdaw_ui.workspace = true
+jackdaw_geometry.workspace = true
+jackdaw_scene_types.workspace = true
+jackdaw_project_build.workspace = true
+jackdaw_csg.workspace = true
+bevy_monitors.workspace = true
+bevy_window_chrome.workspace = true
+jackdaw_camera.workspace = true
+jackdaw_feathers.workspace = true
+jackdaw_widgets.workspace = true
+jackdaw_commands.workspace = true
+jackdaw_terrain.workspace = true
+jackdaw_remote.workspace = true
+jackdaw_snap.workspace = true
+jackdaw_select.workspace = true
+jackdaw_uv.workspace = true
+jackdaw_pick.workspace = true
+jackdaw_hull.workspace = true
+jackdaw_material.workspace = true
+jackdaw_node_graph.workspace = true
+jackdaw_animation.workspace = true
+jackdaw_avian_integration.workspace = true
+# Optional, activated by the default-on `multiplayer` feature. Together
+# these bundle the editor-only networking authoring extension (proxy
+# reflection types + the toggleable networking extension) into the
+# editor; no lightyear is compiled into the editor. Gated so
+# `--no-default-features` produces a slimmer build.
+jackdaw_multiplayer = { workspace = true, optional = true }
+jackdaw_multiplayer_editor = { workspace = true, optional = true }
+jackdaw_camera_rig = { workspace = true, optional = true }
+jackdaw_panels.workspace = true
+jackdaw_api.workspace = true
+# The editor crate uses `jackdaw_api` the same way third-party
+# extension authors do, and reaches into `jackdaw_api_internal` only
+# for host-side plumbing (loader plugin, catalog, enable/disable
+# helpers, internal component markers) that `jackdaw_api` deliberately
+# doesn't re-export.
+jackdaw_api_internal.workspace = true
+jackdaw_loader.workspace = true
+# Used by the jackdaw-runner binary to dlopen project dylibs.
+libloading = { version = "0.8", optional = true }
+# `jackdaw_runtime` hosts the standalone scene loader plus the
+# `EditorMeta`/`ReflectEditorMeta` trait that user game crates
+# implement. The editor depends on it (rather than the other way
+# around) so the trait is reachable from a game crate that only
+# pulls in `jackdaw_runtime` and never compiles the editor.
+jackdaw_runtime.workspace = true
+# Process-based Play: the editor spawns the project's game binary and
+# drives it over ipc-channel. The protocol's `ipc` transport is light
+# enough to be unconditional, so Play always works in the editor with
+# no per-build feature gate.
+jackdaw_pie_protocol = { path = "crates/jackdaw_pie_protocol", features = [
+    "ipc",
+] }
+# Optional and activated only by the `dylib` feature. Nothing in
+# the editor's own Rust code imports `jackdaw_sdk` - it's a pure
+# build artifact consumed at runtime by the extension build
+# pipeline (`SdkPaths::compute` / `ext_build`), which already
+# handles a missing SDK with a user-actionable error. Keeping it
+# optional means default `cargo build` doesn't try to link
+# `jackdaw_sdk.dll` on Windows, where the dylib's re-exports
+# would otherwise blow past the 65,535 PE export cap. See issue #183.
+jackdaw_sdk = { workspace = true, optional = true }
+# The wrapper's logic also lives in this crate's `[[bin]]` so that
+# `cargo install jackdaw` ships `jackdaw-rustc-wrapper` next to the
+# editor binary. Both binaries call into the same library entry
+# point. For dev builds running from a source checkout the standalone
+# wrapper crate's `[[bin]]` is also available; either path works at
+# runtime.
+jackdaw_rustc_wrapper.workspace = true
+jackdaw_runner.workspace = true
+jackdaw_cli_internal.workspace = true
+bevy_enhanced_input.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+avian3d.workspace = true
+rfd.workspace = true
+bevy_rerecast.workspace = true
+ehttp.workspace = true
+bincode.workspace = true
+base64.workspace = true
+anyhow.workspace = true
+arboard = { version = "3", features = ["wayland-data-control"] }
+dirs.workspace = true
+regex.workspace = true
+pathdiff.workspace = true
+notify = "8"
+ctrlc = "3"
+toml = "0.8"
+# Format-preserving TOML edits for `jd import` (existing-project integration).
+toml_edit = "0.22"
+# Compare a project's declared bevy requirement against the supported
+# minor properly: a textual prefix test both accepts `0.190` and rejects
+# a compatible range like `>=0.19, <0.21`.
+semver = "1"
+# Embed the project templates into the binary so `jd new` scaffolds
+# offline with no cargo-generate dependency.
+include_dir = "0.7"
+# Parse + rewrite a project's `main.rs` when migrating a bin-only project into a
+# `GamePlugin` library (`src/migrate.rs`). `span-locations` gives byte spans so
+# moved item definitions are sliced verbatim (comments preserved); prettyplease
+# formats only the synthetic `GamePlugin` impl we generate.
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+prettyplease = "0.2"
+winit.workspace = true
+image.workspace = true
+time.workspace = true
+jackdaw_localization = { version = "0.20.0-dev", path = "crates/jackdaw_localization" }
+webbrowser.workspace = true
+
+# Powers the Linux `PR_SET_PDEATHSIG` hook that takes PIE game processes down
+# with the editor when it is killed (`src/pie.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# Every workspace crate inherits this version (`version.workspace = true`).
+# It is anchored to Bevy's minor: 0.19.x targets Bevy 0.19, and bumps to
+# 0.20.0-dev when the workspace moves to Bevy main. Jackdaw's own patch number
+# advances independently within a Bevy minor.
+[workspace.package]
+version = "0.20.0-dev"
+
+[workspace.dependencies]
+bevy = { version = "0.20.0-dev", features = [
+    "bevy_feathers",
+    "bevy_scene",
+    "bevy_dev_tools",
+    "serialize",
+    "debug",
+    "bevy_remote",
+    "file_watcher",
+    "reflect_documentation",
+], path = "../.." }
+jackdaw_jsn = { version = "0.20.0-dev", path = "crates/jackdaw_jsn" }
+jackdaw_geometry = { version = "0.20.0-dev", path = "crates/jackdaw_geometry" }
+jackdaw_scene_types = { version = "0.20.0-dev", path = "crates/jackdaw_scene_types" }
+jackdaw_project_build = { version = "0.20.0-dev", path = "crates/jackdaw_project_build" }
+jackdaw_bsn = { version = "0.20.0-dev", path = "crates/jackdaw_bsn" }
+jackdaw_ui = { version = "0.20.0-dev", path = "crates/jackdaw_ui" }
+jackdaw_csg = { version = "0.20.0-dev", path = "crates/jackdaw_csg" }
+bevy_monitors = { version = "0.3.0", path = "vendor/bevy-coupled/bevy-monitors" }
+bevy_window_chrome = { version = "0.20.0-dev", path = "crates/bevy_window_chrome" }
+jackdaw_camera = { version = "0.20.0-dev", path = "crates/jackdaw_camera" }
+jackdaw_camera_rig = { version = "0.20.0-dev", path = "crates/jackdaw_camera_rig" }
+jackdaw_feathers = { version = "0.20.0-dev", path = "crates/jackdaw_feathers" }
+jackdaw_widgets = { version = "0.20.0-dev", path = "crates/jackdaw_widgets" }
+jackdaw_commands = { version = "0.20.0-dev", path = "crates/jackdaw_commands" }
+jackdaw_terrain = { version = "0.20.0-dev", path = "crates/jackdaw_terrain" }
+jackdaw_remote = { version = "0.20.0-dev", path = "crates/jackdaw_remote" }
+jackdaw_snap = { version = "0.20.0-dev", path = "crates/jackdaw_snap" }
+jackdaw_select = { version = "0.20.0-dev", path = "crates/jackdaw_select" }
+jackdaw_uv = { version = "0.20.0-dev", path = "crates/jackdaw_uv" }
+jackdaw_pick = { version = "0.20.0-dev", path = "crates/jackdaw_pick" }
+jackdaw_hull = { version = "0.20.0-dev", path = "crates/jackdaw_hull" }
+jackdaw_material = { version = "0.20.0-dev", path = "crates/jackdaw_material" }
+jackdaw_node_graph = { version = "0.20.0-dev", path = "crates/jackdaw_node_graph" }
+jackdaw_animation = { version = "0.20.0-dev", path = "crates/jackdaw_animation" }
+jackdaw_fuzzy = { version = "0.20.0-dev", path = "crates/jackdaw_fuzzy" }
+jackdaw_localization = { version = "0.20.0-dev", path = "crates/jackdaw_localization" }
+glam = { version = "0.33.2", features = ["serde"] }
+noise = "0.9"
+rand = "0.9"
+serde = "1"
+lucide-icons = "0.563"
+serde_json = "1"
+# Default features stay on so the SDK resolves at least what a project
+# does: the game template adds a plain `avian3d = "0.7"`, and against an
+# SDK built leaner, any use of an item behind one of the dropped
+# features fails to compile against the redirected rlib.
+# `tests/sdk_feature_superset.rs` guards that ordering.
+avian3d = { version = "0.7.0", features = [
+    "3d",
+    "parry-f32",
+    "collider-from-mesh",
+], path = "vendor/bevy-coupled/avian/packages/avian3d" }
+jackdaw_avian_integration = { version = "0.20.0-dev", path = "crates/jackdaw_avian_integration" }
+jackdaw_multiplayer = { version = "0.20.0-dev", path = "crates/jackdaw_multiplayer" }
+jackdaw_multiplayer_editor = { version = "0.20.0-dev", path = "crates/jackdaw_multiplayer_editor" }
+jackdaw_runtime = { version = "0.20.0-dev", path = "crates/jackdaw_runtime" }
+jackdaw_panels = { version = "0.20.0-dev", path = "crates/jackdaw_panels" }
+jackdaw_api = { version = "0.20.0-dev", path = "crates/jackdaw_api" }
+jackdaw_extension = { version = "0.20.0-dev", path = "crates/jackdaw_extension" }
+jackdaw_api_internal = { version = "0.20.0-dev", path = "crates/jackdaw_api_internal" }
+jackdaw_api_macros = { version = "0.20.0-dev", path = "crates/jackdaw_api_macros" }
+jackdaw_dylib = { version = "0.20.0-dev", path = "crates/jackdaw_dylib" }
+jackdaw_loader = { version = "0.20.0-dev", path = "crates/jackdaw_loader" }
+jackdaw_sdk = { version = "0.20.0-dev", path = "crates/jackdaw_sdk" }
+jackdaw_rustc_wrapper = { version = "0.20.0-dev", path = "crates/jackdaw_rustc_wrapper" }
+jackdaw_runner = { version = "0.20.0-dev", path = "crates/jackdaw_runner" }
+jackdaw_cli_internal = { version = "0.20.0-dev", path = "crates/jackdaw_cli" }
+bevy_enhanced_input = { version = "0.26.0", path = "vendor/bevy-coupled/bevy-enhanced-input" }
+rfd = "0.15"
+bevy_rerecast = { default-features = true, path = "vendor/bevy-coupled/rerecast/crates/bevy_rerecast", version = "0.4.0" }
+ehttp = { version = "0.5", default-features = false, features = [
+    "native-async",
+    "json",
+] }
+bincode = { version = "2", features = ["serde"], default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+anyhow = { version = "1", default-features = false }
+dirs = "6"
+regex = "1"
+pathdiff = "0.2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+winit = "0.30.13"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+time = { version = "0.3.47", default-features = false, features = [
+    "std",
+    "local-offset",
+    "formatting",
+    # Read back the RFC 3339 stamps we write, so the launcher can show
+    # how long ago a project was last opened.
+    "parsing",
+] }
+fluent = "0.16"
+webbrowser = "1"
+fluent_content = "0.0.5"
+unic-langid = { version = "0.9", features = ["macros"] }
+sys-locale = "0.2"
+
+# Idiomatic Bevy code often triggers these lints, and the CI workflow treats them as errors.
+[workspace.lints.clippy]
+doc_markdown = "warn"
+
+redundant_else = "warn"
+semicolon_if_nothing_returned = "warn"
+type_complexity = "allow"
+unwrap_or_default = "warn"
+disallowed_methods = "warn"
+needless_lifetimes = "allow"
+too_many_arguments = "allow"
+nonstandard_macro_braces = "warn"
+print_stdout = "warn"
+
+ptr_as_ptr = "warn"
+ptr_cast_constness = "warn"
+ref_as_ptr = "warn"
+
+# see: https://github.com/bevyengine/bevy/pull/15375#issuecomment-2366966219
+too_long_first_doc_paragraph = "allow"
+
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+match_same_arms = "warn"
+manual_let_else = "warn"
+print_stderr = "warn"
+redundant_closure_for_method_calls = "warn"
+
+# TODO: enable these if you have time!
+# undocumented_unsafe_blocks = "warn"
+
+[dev-dependencies]
+bevy = { workspace = true, features = ["dynamic_linking"] }
+jackdaw_runtime.workspace = true
+libloading = "0.8"
+serde_json.workspace = true
+tempfile = "3"
+# Pulled in so cargo builds the fixture cdylib as part of the
+# workspace test-target graph. `tests/dylib_loading.rs` dlopens the
+# resulting `.so` by path - it doesn't reference the rlib side.
+test_fixture_extension = { path = "tests/fixtures/test_fixture_extension" }
+
+[lints]
+workspace = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.wgpu-types]
+debug-assertions = false
+
+# `jackdaw_sdk`'s dylib re-exports all of bevy + jackdaw_api, which
+# is right at the Windows MSVC PE export cap (65,535 symbols). Force
+# full optimisation and a single codegen unit on just this one crate
+# so the linker has a chance of fitting it under the cap when
+# `--features dylib` is active on Windows. See issue #183.
+[profile.dev.package.jackdaw_sdk]
+opt-level = 3
+codegen-units = 1
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+# Same rationale as `[profile.dev.package.jackdaw_sdk]`. `lto` isn't
+# a valid per-package option (it controls the final link), so we only
+# tighten codegen-units here; the workspace-wide `[profile.release]
+# lto = "thin"` covers the cross-crate dedup that actually helps the
+# PE export cap.
+[profile.release.package.jackdaw_sdk]
+codegen-units = 1
+
+# Thin shim that re-exports `jackdaw_rustc_wrapper::run()`. We turn
+# off doc generation because rustdoc's output path collides with the
+# `jackdaw_rustc_wrapper` lib crate's docs (cargo translates dashes
+# to underscores), and the shim has nothing user-facing to document
+# anyway.
+[[bin]]
+name = "jackdaw-rustc-wrapper"
+path = "src/bin/jackdaw-rustc-wrapper.rs"
+doc = false
+
+[[bin]]
+name = "jd"
+path = "src/bin/jd.rs"
+doc = false
+
+[[bin]]
+name = "jackdaw-runner"
+path = "src/bin/jackdaw-runner.rs"
+doc = false
+
+[patch.crates-io]
+aeronet_io = { path = "vendor/bevy-coupled/aeronet/crates/aeronet_io" }
+aeronet_steam = { path = "vendor/bevy-coupled/aeronet/crates/aeronet_steam" }
+aeronet_websocket = { path = "vendor/bevy-coupled/aeronet/crates/aeronet_websocket" }
+aeronet_webtransport = { path = "vendor/bevy-coupled/aeronet/crates/aeronet_webtransport" }
+avian2d = { path = "vendor/bevy-coupled/avian/packages/avian2d" }
+avian3d = { path = "vendor/bevy-coupled/avian/packages/avian3d" }
+bevy = { path = "../.." }
+bevy_app = { path = "../../crates/bevy_app" }
+bevy_asset = { path = "../../crates/bevy_asset" }
+bevy_camera = { path = "../../crates/bevy_camera" }
+bevy_color = { path = "../../crates/bevy_color" }
+bevy_derive = { path = "../../crates/bevy_derive" }
+bevy_diagnostic = { path = "../../crates/bevy_diagnostic" }
+bevy_ecs = { path = "../../crates/bevy_ecs" }
+bevy_enhanced_input = { path = "vendor/bevy-coupled/bevy-enhanced-input" }
+bevy_gizmos = { path = "../../crates/bevy_gizmos" }
+bevy_heavy = { path = "vendor/bevy-coupled/bevy-heavy" }
+bevy_image = { path = "../../crates/bevy_image" }
+bevy_input = { path = "../../crates/bevy_input" }
+bevy_light = { path = "../../crates/bevy_light" }
+bevy_log = { path = "../../crates/bevy_log" }
+bevy_material = { path = "../../crates/bevy_material" }
+bevy_math = { path = "../../crates/bevy_math" }
+bevy_mesh = { path = "../../crates/bevy_mesh" }
+bevy_monitors = { path = "vendor/bevy-coupled/bevy-monitors" }
+bevy_pbr = { path = "../../crates/bevy_pbr" }
+bevy_platform = { path = "../../crates/bevy_platform" }
+bevy_ptr = { path = "../../crates/bevy_ptr" }
+bevy_reflect = { path = "../../crates/bevy_reflect" }
+bevy_remote = { path = "../../crates/bevy_remote" }
+bevy_render = { path = "../../crates/bevy_render" }
+bevy_replicon = { path = "vendor/bevy-coupled/bevy-replicon" }
+bevy_scene = { path = "../../crates/bevy_scene" }
+bevy_state = { path = "../../crates/bevy_state" }
+bevy_tasks = { path = "../../crates/bevy_tasks" }
+bevy_text = { path = "../../crates/bevy_text" }
+bevy_time = { path = "../../crates/bevy_time" }
+bevy_transform = { path = "../../crates/bevy_transform" }
+bevy_transform_interpolation = { path = "vendor/bevy-coupled/bevy-transform-interpolation" }
+bevy_ui = { path = "../../crates/bevy_ui" }
+bevy_utils = { path = "../../crates/bevy_utils" }
+bevy_winit = { path = "../../crates/bevy_winit" }
+glam_matrix_extras = { path = "vendor/bevy-coupled/glam-matrix-extras" }
+leafwing-input-manager = { path = "vendor/bevy-coupled/leafwing-input-manager" }
+lightyear = { path = "vendor/bevy-coupled/lightyear/crates/core/lightyear" }
+lightyear_aeronet = { path = "vendor/bevy-coupled/lightyear/crates/io/aeronet" }
+lightyear_avian2d = { path = "vendor/bevy-coupled/lightyear/crates/integration/avian2d" }
+lightyear_avian3d = { path = "vendor/bevy-coupled/lightyear/crates/integration/avian3d" }
+lightyear_connection = { path = "vendor/bevy-coupled/lightyear/crates/connection/connection" }
+lightyear_core = { path = "vendor/bevy-coupled/lightyear/crates/core/core" }
+lightyear_deterministic_replication = { path = "vendor/bevy-coupled/lightyear/crates/deterministic/deterministic_replication" }
+lightyear_frame_interpolation = { path = "vendor/bevy-coupled/lightyear/crates/core/frame_interpolation" }
+lightyear_inputs = { path = "vendor/bevy-coupled/lightyear/crates/inputs/inputs" }
+lightyear_inputs_bei = { path = "vendor/bevy-coupled/lightyear/crates/inputs/input_bei" }
+lightyear_inputs_leafwing = { path = "vendor/bevy-coupled/lightyear/crates/inputs/inputs_leafwing" }
+lightyear_inputs_native = { path = "vendor/bevy-coupled/lightyear/crates/inputs/inputs_native" }
+lightyear_interpolation = { path = "vendor/bevy-coupled/lightyear/crates/replication/interpolation" }
+lightyear_link = { path = "vendor/bevy-coupled/lightyear/crates/io/link" }
+lightyear_messages = { path = "vendor/bevy-coupled/lightyear/crates/transport/messages" }
+lightyear_metrics = { path = "vendor/bevy-coupled/lightyear/crates/tools/metrics" }
+lightyear_netcode = { path = "vendor/bevy-coupled/lightyear/crates/connection/netcode" }
+lightyear_prediction = { path = "vendor/bevy-coupled/lightyear/crates/replication/prediction" }
+lightyear_raw_connection = { path = "vendor/bevy-coupled/lightyear/crates/connection/raw_connection" }
+lightyear_replication = { path = "vendor/bevy-coupled/lightyear/crates/replication/replication" }
+lightyear_serde = { path = "vendor/bevy-coupled/lightyear/crates/transport/serde" }
+lightyear_steam = { path = "vendor/bevy-coupled/lightyear/crates/connection/steam" }
+lightyear_sync = { path = "vendor/bevy-coupled/lightyear/crates/core/sync" }
+lightyear_tools = { path = "vendor/bevy-coupled/lightyear/crates/tools/tools" }
+lightyear_transport = { path = "vendor/bevy-coupled/lightyear/crates/transport/transport" }
+lightyear_udp = { path = "vendor/bevy-coupled/lightyear/crates/io/udp" }
+lightyear_utils = { path = "vendor/bevy-coupled/lightyear/crates/core/utils" }
+lightyear_websocket = { path = "vendor/bevy-coupled/lightyear/crates/io/websocket" }
+lightyear_webtransport = { path = "vendor/bevy-coupled/lightyear/crates/io/webtransport" }
+
+[patch."https://github.com/HeyPlayGames/rerecast"]
+bevy_rerecast = { path = "vendor/bevy-coupled/rerecast/crates/bevy_rerecast" }
+bevy_rerecast_core = { path = "vendor/bevy-coupled/rerecast/crates/bevy_rerecast_core" }
+bevy_rerecast_editor_integration = { path = "vendor/bevy-coupled/rerecast/crates/bevy_rerecast_editor_integration" }
+rerecast = { path = "vendor/bevy-coupled/rerecast/crates/rerecast" }

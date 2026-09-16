@@ -1,0 +1,12 @@
+[package]
+name = "ecosystem_game"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+
+[dependencies]
+bevy = { version = "0.20.0-dev", default-features = false, features = ["reflect_auto_register"], path = "../../../../.." }
+avian3d = { version = "0.7.0", path = "../../../vendor/bevy-coupled/avian/packages/avian3d" }

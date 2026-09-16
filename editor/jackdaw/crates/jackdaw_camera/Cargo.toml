@@ -1,0 +1,13 @@
+[package]
+name = "jackdaw_camera"
+version.workspace = true
+edition = "2024"
+description = "Internal crate for the jackdaw editor"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jbuehler23/jackdaw"
+
+[dependencies]
+bevy.workspace = true
+
+[lints]
+workspace = true

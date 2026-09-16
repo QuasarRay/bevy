@@ -1,0 +1,1155 @@
+use bevy::feathers::cursor::{EntityCursor, OverrideCursor};
+use bevy::input_focus::{FocusCause, InputFocus};
+use bevy::picking::hover::Hovered;
+use bevy::prelude::*;
+use bevy::text::{
+    EditableText, EditableTextFilter, FontFeatureTag, FontFeatures, FontSize, LineHeight,
+    TextCursorStyle, TextEdit, TextLayoutInfo,
+};
+use bevy::ui::InteractionDisabled;
+
+use crate::icons::{EditorFont, IconFont};
+use crate::tokens::{
+    self, AXIS_LABEL_BG, BORDER_COLOR, ELEVATED_BG, PRIMARY_COLOR, SHADOW_COLOR_LIGHT,
+    TEXT_BODY_COLOR, TEXT_MUTED_COLOR, TEXT_SIZE, TEXT_SIZE_PX, TEXT_SIZE_SM,
+};
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(Update, setup_text_edit_input)
+        .add_systems(
+            Update,
+            (
+                handle_focus_style,
+                handle_numeric_increment,
+                (handle_unfocus, handle_clamp_on_unfocus).chain(),
+                handle_drag_value,
+                handle_click_to_focus,
+                sync_text_edit_values,
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                apply_default_value,
+                sync_placeholder_visibility,
+                handle_suffix,
+            )
+                .chain(),
+        );
+}
+
+pub fn set_text_input_value(editable: &mut EditableText, text: String) {
+    editable.editor_mut().set_text(&text);
+    editable.queue_edit(TextEdit::TextEnd(false));
+}
+
+fn editable_text_string(editable: &EditableText) -> String {
+    editable.value().into_iter().collect()
+}
+
+#[derive(Event)]
+pub struct TextEditCommitEvent {
+    pub entity: Entity,
+    pub text: String,
+}
+
+/// Synced from the inner `EditableText` every frame. Attach to the outer wrapper entity
+/// so consumers can poll the current text value without reaching into child entities.
+#[derive(Component, Default, Clone)]
+pub struct TextEditValue(pub String);
+
+const INPUT_HEIGHT: f32 = 28.0;
+const AFFIX_SIZE: u64 = 16;
+const WRAPPER_PADDING: f32 = 8.0;
+const PREFIX_EXTRA: f32 = AFFIX_SIZE as f32 + 6.0;
+
+#[derive(Component)]
+pub struct EditorTextEdit;
+
+#[derive(Component)]
+pub struct TextEditWrapper(pub Entity);
+
+/// Marker inserted on the wrapper entity while the user is drag-adjusting a numeric value.
+/// Used by consumers to skip refresh/sync that would overwrite the in-flight drag value.
+#[derive(Component)]
+pub struct TextEditDragging;
+
+#[derive(Component, Default, Clone, Copy, PartialEq)]
+pub enum TextEditVariant {
+    #[default]
+    Default,
+    NumericF32,
+    NumericI32,
+}
+
+impl TextEditVariant {
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Self::NumericF32 | Self::NumericI32)
+    }
+}
+
+#[derive(Clone)]
+pub enum TextEditPrefix {
+    Label {
+        label: String,
+        size: f32,
+        /// Optional accent color shown as a 2px left border on the label.
+        color: Option<Color>,
+    },
+    /// Icon-font glyph rendered with the lucide icon font. Used by the
+    /// numeric drag-scrubber prefix.
+    Icon {
+        glyph: String,
+        size: f32,
+        /// Optional accent color shown as a 2px left border, same as
+        /// the `Label` variant.
+        color: Option<Color>,
+    },
+}
+
+#[derive(Component)]
+struct TextEditSuffix(String);
+
+#[derive(Component)]
+struct TextEditSuffixNode(Entity);
+
+#[derive(Component)]
+struct TextEditPlaceholderNode(Entity);
+
+#[derive(Component)]
+struct TextEditDefaultValue(String);
+
+#[derive(Component, Default)]
+struct DragHitbox {
+    dragging: bool,
+    start_x: f32,
+    start_value: f64,
+}
+
+#[derive(Component, Clone, Copy)]
+struct NumericRange {
+    min: f64,
+    max: f64,
+}
+
+#[derive(Component)]
+struct AllowEmpty;
+
+#[derive(Clone)]
+pub enum FilterType {
+    Decimal,
+    Integer,
+}
+
+#[derive(Component)]
+pub struct TextEditConfig {
+    label: Option<String>,
+    pub variant: TextEditVariant,
+    filter: Option<FilterType>,
+    prefix: Option<TextEditPrefix>,
+    suffix: Option<String>,
+    placeholder: String,
+    default_value: Option<String>,
+    min: f64,
+    max: f64,
+    auto_focus: bool,
+    allow_empty: bool,
+    drag_bottom: bool,
+    disabled: bool,
+    pub initialized: bool,
+}
+
+pub struct TextEditProps {
+    pub label: Option<String>,
+    pub placeholder: String,
+    pub default_value: Option<String>,
+    pub variant: TextEditVariant,
+    pub filter: Option<FilterType>,
+    pub prefix: Option<TextEditPrefix>,
+    pub suffix: Option<String>,
+    pub min: f64,
+    pub max: f64,
+    pub disabled: bool,
+    pub auto_focus: bool,
+    pub allow_empty: bool,
+    pub drag_bottom: bool,
+    pub grow: bool,
+}
+
+impl Default for TextEditProps {
+    fn default() -> Self {
+        Self {
+            label: None,
+            placeholder: String::new(),
+            default_value: None,
+            variant: TextEditVariant::Default,
+            filter: None,
+            prefix: None,
+            suffix: None,
+            min: f64::MIN,
+            max: f64::MAX,
+            disabled: false,
+            auto_focus: false,
+            allow_empty: false,
+            drag_bottom: false,
+            grow: false,
+        }
+    }
+}
+
+impl TextEditProps {
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+    pub fn with_prefix(mut self, prefix: TextEditPrefix) -> Self {
+        self.prefix = Some(prefix);
+        self
+    }
+    pub fn with_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
+    }
+    pub fn with_default_value(mut self, value: impl Into<String>) -> Self {
+        self.default_value = Some(value.into());
+        self
+    }
+    pub fn with_min(mut self, min: f64) -> Self {
+        self.min = min;
+        self
+    }
+    pub fn with_max(mut self, max: f64) -> Self {
+        self.max = max;
+        self
+    }
+    pub fn allow_empty(mut self) -> Self {
+        self.allow_empty = true;
+        self
+    }
+    pub fn drag_bottom(mut self) -> Self {
+        self.drag_bottom = true;
+        self
+    }
+    pub fn grow(mut self) -> Self {
+        self.grow = true;
+        self
+    }
+    pub fn auto_focus(mut self) -> Self {
+        self.auto_focus = true;
+        self
+    }
+    pub fn disabled(self) -> Self {
+        self.with_disabled(true)
+    }
+    pub fn with_disabled(mut self, value: bool) -> Self {
+        self.disabled = value;
+        self
+    }
+    pub fn numeric_f32(mut self) -> Self {
+        self.variant = TextEditVariant::NumericF32;
+        self.filter = Some(FilterType::Decimal);
+        self.prefix = Some(TextEditPrefix::Icon {
+            glyph: String::from(crate::icons::Icon::ChevronsLeftRight.unicode()),
+            size: TEXT_SIZE_PX,
+            color: None,
+        });
+        self.min = f32::MIN as f64;
+        self.max = f32::MAX as f64;
+        self
+    }
+    pub fn numeric_i32(mut self) -> Self {
+        self.variant = TextEditVariant::NumericI32;
+        self.filter = Some(FilterType::Integer);
+        self.prefix = Some(TextEditPrefix::Icon {
+            glyph: String::from(crate::icons::Icon::ChevronsLeftRight.unicode()),
+            size: TEXT_SIZE_PX,
+            color: None,
+        });
+        self.min = i32::MIN as f64;
+        self.max = i32::MAX as f64;
+        self
+    }
+
+    /// Numeric input for any integer type up to `i64`/`u32` range.
+    /// Same display/filter as [`Self::numeric_i32`] but with bounds
+    /// that cover `u32` bitmasks (e.g. `CollisionLayers::memberships`)
+    /// without clamping. Use for any inspector field whose source
+    /// type is integer (`u32`, `i64`, `usize`, ...) but whose actual
+    /// range is unknown at the call site.
+    pub fn numeric_int(mut self) -> Self {
+        self.variant = TextEditVariant::NumericI32;
+        self.filter = Some(FilterType::Integer);
+        self.prefix = Some(TextEditPrefix::Icon {
+            glyph: String::from(crate::icons::Icon::ChevronsLeftRight.unicode()),
+            size: TEXT_SIZE_PX,
+            color: None,
+        });
+        // f64 covers exact integers up to 2^53; that's more than
+        // enough headroom for u32 (full range) and any practical i64.
+        self.min = -(1i64 << 53) as f64;
+        self.max = (1i64 << 53) as f64;
+        self
+    }
+}
+
+pub fn text_edit(props: TextEditProps) -> impl Bundle {
+    let TextEditProps {
+        label,
+        placeholder,
+        default_value,
+        variant,
+        filter,
+        prefix,
+        suffix,
+        min,
+        max,
+        auto_focus,
+        allow_empty,
+        drag_bottom,
+        disabled,
+        grow: _,
+    } = props;
+
+    (
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: px(3),
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            min_width: px(0),
+            ..default()
+        },
+        TextEditConfig {
+            label,
+            variant,
+            filter,
+            prefix,
+            suffix,
+            placeholder,
+            default_value,
+            min,
+            max,
+            auto_focus,
+            allow_empty,
+            drag_bottom,
+            disabled,
+            initialized: false,
+        },
+        TextEditValue::default(),
+    )
+}
+
+fn setup_text_edit_input(
+    mut commands: Commands,
+    editor_font: Res<EditorFont>,
+    icon_font: Option<Res<IconFont>>,
+    mut configs: Query<(Entity, &mut TextEditConfig)>,
+    mut focus: ResMut<InputFocus>,
+) {
+    let font = editor_font.0.clone();
+    let icon_font_handle = icon_font.map(|f| f.0.clone());
+    let tabular_figures: FontFeatures = [FontFeatureTag::TABULAR_FIGURES].into();
+
+    for (entity, mut config) in &mut configs {
+        if config.initialized {
+            continue;
+        }
+        config.initialized = true;
+
+        if let Some(ref label) = config.label {
+            let label_entity = commands
+                .spawn((
+                    Text::new(label),
+                    TextFont {
+                        font: font.clone().into(),
+                        font_size: TEXT_SIZE_SM,
+                        weight: FontWeight::MEDIUM,
+                        ..default()
+                    },
+                    TextColor(TEXT_MUTED_COLOR.into()),
+                ))
+                .id();
+            crate::utils::attach_or_despawn(&mut commands, entity, label_entity);
+        }
+
+        let is_numeric = config.variant.is_numeric();
+        let filter = config.filter.as_ref().map(|filter_type| match filter_type {
+            FilterType::Decimal => EditableTextFilter::new(|character| {
+                character.is_ascii_digit() || character == '.' || character == '-'
+            }),
+            FilterType::Integer => {
+                EditableTextFilter::new(|character| character.is_ascii_digit() || character == '-')
+            }
+        });
+
+        let has_prefix = config.prefix.is_some();
+        let wrapper_entity = commands
+            .spawn((
+                Node {
+                    width: percent(100),
+                    height: px(INPUT_HEIGHT),
+                    // If prefix, only a small bit of left padding so the label sits close to the edge
+                    padding: if has_prefix {
+                        UiRect::new(
+                            px(tokens::SPACING_XS),
+                            px(tokens::SPACING_MD),
+                            px(tokens::SPACING_SM),
+                            px(tokens::SPACING_SM),
+                        )
+                    } else {
+                        UiRect::axes(px(tokens::SPACING_MD), px(tokens::SPACING_SM))
+                    },
+                    border_radius: BorderRadius::all(px(tokens::BORDER_RADIUS_MD)),
+                    // Stretch so prefix fills full height
+                    align_items: if has_prefix {
+                        AlignItems::Stretch
+                    } else {
+                        AlignItems::Center
+                    },
+                    column_gap: px(tokens::SPACING_MD),
+                    ..default()
+                },
+                BackgroundColor(ELEVATED_BG),
+                BoxShadow(vec![ShadowStyle {
+                    x_offset: Val::ZERO,
+                    y_offset: Val::ZERO,
+                    blur_radius: Val::Px(1.0),
+                    spread_radius: Val::Px(1.0),
+                    color: SHADOW_COLOR_LIGHT,
+                }]),
+                Hovered::default(),
+                EntityCursor::System(bevy::window::SystemCursorIcon::Text),
+            ))
+            .observe(
+                |mut ev: On<bevy::picking::events::Pointer<bevy::picking::events::DragStart>>| {
+                    ev.propagate(false);
+                },
+            )
+            .observe(
+                |mut ev: On<bevy::picking::events::Pointer<bevy::picking::events::Drag>>| {
+                    ev.propagate(false);
+                },
+            )
+            .observe(
+                |mut ev: On<bevy::picking::events::Pointer<bevy::picking::events::DragEnd>>| {
+                    ev.propagate(false);
+                },
+            )
+            .observe(
+                |mut ev: On<bevy::picking::events::Pointer<bevy::picking::events::Click>>| {
+                    ev.propagate(false);
+                },
+            )
+            .observe(
+                |mut ev: On<bevy::picking::events::Pointer<bevy::picking::events::Press>>| {
+                    ev.propagate(false);
+                },
+            )
+            .id();
+
+        // `entity` can be cascade-despawned by an inspector rebuild
+        // between the `commands.spawn` of `wrapper_entity` above and
+        // this `add_child` flushing; `attach_or_despawn` either
+        // attaches cleanly or despawns the orphaned wrapper so no
+        // stray UI node ends up at the window root.
+        crate::utils::attach_or_despawn(&mut commands, entity, wrapper_entity);
+
+        if is_numeric && !config.drag_bottom && !config.disabled {
+            // When there's a prefix (XYZ label), the drag hitbox covers ONLY the
+            // label area so clicking the value area still lets you type.
+            // Without a prefix, the hitbox covers the left portion of the input.
+            let (hitbox_left, hitbox_width) = if has_prefix {
+                (0.0, AFFIX_SIZE as f32)
+            } else {
+                (0.0, INPUT_HEIGHT * 0.9)
+            };
+            let hitbox = commands
+                .spawn((
+                    DragHitbox::default(),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: px(hitbox_width),
+                        height: px(INPUT_HEIGHT),
+                        left: px(hitbox_left),
+                        ..default()
+                    },
+                    ZIndex(10),
+                    Hovered::default(),
+                    EntityCursor::System(bevy::window::SystemCursorIcon::ColResize),
+                ))
+                .id();
+            crate::utils::attach_or_despawn(&mut commands, wrapper_entity, hitbox);
+        }
+
+        if let Some(ref prefix) = config.prefix {
+            let prefix_entity = match prefix {
+                TextEditPrefix::Label { label, size, color } => {
+                    let has_color = color.is_some();
+                    let text_color = if has_color {
+                        crate::tokens::TEXT_PRIMARY
+                    } else {
+                        TEXT_BODY_COLOR.with_alpha(0.5).into()
+                    };
+
+                    // Container node for layout (bg, border, sizing)
+                    let prefix_id = commands
+                        .spawn((
+                            Node {
+                                width: px(AFFIX_SIZE),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: if has_color {
+                                    UiRect::left(px(2))
+                                } else {
+                                    UiRect::default()
+                                },
+                                border_radius: if has_color {
+                                    BorderRadius::left(px(2.5))
+                                } else {
+                                    BorderRadius::default()
+                                },
+                                ..default()
+                            },
+                            children![(
+                                Text::new(label),
+                                TextFont {
+                                    font: font.clone().into(),
+                                    font_size: FontSize::Px(*size),
+                                    ..default()
+                                },
+                                TextColor(text_color),
+                                TextLayout::justify(Justify::Center),
+                            )],
+                        ))
+                        .id();
+                    if let Some(c) = color {
+                        commands
+                            .entity(prefix_id)
+                            .insert((BorderColor::all(*c), BackgroundColor(AXIS_LABEL_BG)));
+                    }
+                    prefix_id
+                }
+                TextEditPrefix::Icon { glyph, size, color } => {
+                    let has_color = color.is_some();
+                    let text_color = if has_color {
+                        crate::tokens::TEXT_PRIMARY
+                    } else {
+                        TEXT_BODY_COLOR.with_alpha(0.5).into()
+                    };
+                    let glyph_font = icon_font_handle.clone().unwrap_or_else(|| font.clone());
+
+                    let prefix_id = commands
+                        .spawn((
+                            Node {
+                                width: px(AFFIX_SIZE),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: if has_color {
+                                    UiRect::left(px(2))
+                                } else {
+                                    UiRect::default()
+                                },
+                                border_radius: if has_color {
+                                    BorderRadius::left(px(2.5))
+                                } else {
+                                    BorderRadius::default()
+                                },
+                                ..default()
+                            },
+                            children![(
+                                Text::new(glyph),
+                                TextFont {
+                                    font: glyph_font.into(),
+                                    font_size: FontSize::Px(*size),
+                                    ..default()
+                                },
+                                TextColor(text_color),
+                                TextLayout::justify(Justify::Center),
+                            )],
+                        ))
+                        .id();
+                    if let Some(c) = color {
+                        commands
+                            .entity(prefix_id)
+                            .insert((BorderColor::all(*c), BackgroundColor(AXIS_LABEL_BG)));
+                    }
+                    prefix_id
+                }
+            };
+            crate::utils::attach_or_despawn(&mut commands, wrapper_entity, prefix_entity);
+        }
+
+        let placeholder = config
+            .suffix
+            .as_ref()
+            .map(|s| format!("{}{}", config.placeholder, s))
+            .unwrap_or_else(|| config.placeholder.clone());
+
+        let line_height_px = (TEXT_SIZE_PX * 1.4).round();
+
+        let mut text_input = commands.spawn((
+            EditorTextEdit,
+            config.variant,
+            EditableText::default(),
+            TextFont {
+                font: font.clone().into(),
+                font_size: TEXT_SIZE,
+                font_features: tabular_figures.clone(),
+                ..default()
+            },
+            LineHeight::Px(line_height_px),
+            TextColor(TEXT_BODY_COLOR.into()),
+            TextCursorStyle {
+                color: TEXT_BODY_COLOR.into(),
+                selection_color: PRIMARY_COLOR.with_alpha(0.3).into(),
+                ..default()
+            },
+            Node {
+                flex_grow: 1.0,
+                height: px(line_height_px),
+                justify_content: JustifyContent::Center,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+        ));
+
+        if config.auto_focus && !config.disabled {
+            focus.set(text_input.id(), FocusCause::Navigated);
+        }
+
+        if let Some(filter) = filter {
+            text_input.insert(filter);
+        }
+
+        if config.disabled {
+            text_input.insert(InteractionDisabled);
+        }
+
+        if let Some(ref suffix) = config.suffix {
+            text_input.insert(TextEditSuffix(suffix.clone()));
+        }
+
+        if let Some(ref default_value) = config.default_value {
+            text_input.insert(TextEditDefaultValue(default_value.clone()));
+        }
+
+        if is_numeric {
+            text_input.insert(NumericRange {
+                min: config.min,
+                max: config.max,
+            });
+        }
+
+        if config.allow_empty {
+            text_input.insert(AllowEmpty);
+        }
+
+        let text_input_entity = text_input.id();
+
+        crate::utils::attach_or_despawn(&mut commands, wrapper_entity, text_input_entity);
+
+        if !placeholder.is_empty() {
+            let placeholder_offset = WRAPPER_PADDING + if has_prefix { PREFIX_EXTRA } else { 0.0 };
+            let placeholder_entity = commands
+                .spawn((
+                    TextEditPlaceholderNode(text_input_entity),
+                    Text::new(placeholder),
+                    TextFont {
+                        font: font.clone().into(),
+                        font_size: TEXT_SIZE,
+                        font_features: tabular_figures.clone(),
+                        ..default()
+                    },
+                    TextColor(TEXT_BODY_COLOR.with_alpha(0.2).into()),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(placeholder_offset),
+                        top: px(5.5),
+                        display: Display::None,
+                        ..default()
+                    },
+                ))
+                .id();
+            crate::utils::attach_or_despawn(&mut commands, wrapper_entity, placeholder_entity);
+        }
+
+        if let Some(ref suffix) = config.suffix {
+            let suffix_entity = commands
+                .spawn((
+                    TextEditSuffixNode(text_input_entity),
+                    Text::new(suffix.clone()),
+                    TextFont {
+                        font: font.clone().into(),
+                        font_size: TEXT_SIZE,
+                        font_features: tabular_figures.clone(),
+                        ..default()
+                    },
+                    TextColor(TEXT_MUTED_COLOR.into()),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: px(5.5),
+                        display: Display::None,
+                        ..default()
+                    },
+                ))
+                .id();
+            crate::utils::attach_or_despawn(&mut commands, wrapper_entity, suffix_entity);
+        }
+        // `attach_or_despawn(entity, wrapper_entity)` above may have
+        // already despawned `wrapper_entity` (if its parent field row
+        // was cascade-despawned by a concurrent inspector rebuild).
+        // Use the liveness-checked insert so we don't spam
+        // `Entity despawned` errors when the wrapper is gone.
+        crate::utils::insert_if_alive(
+            &mut commands,
+            wrapper_entity,
+            TextEditWrapper(text_input_entity),
+        );
+    }
+}
+
+fn handle_focus_style(
+    focus: Res<InputFocus>,
+    mut wrappers: Query<(&TextEditWrapper, &mut BorderColor, &Hovered)>,
+) {
+    for (wrapper, mut border_color, hovered) in &mut wrappers {
+        let color = match (focus.get() == Some(wrapper.0), hovered.get()) {
+            (true, _) => PRIMARY_COLOR,
+            (_, true) => BORDER_COLOR.lighter(0.05),
+            _ => BORDER_COLOR,
+        };
+        *border_color = BorderColor::all(color);
+    }
+}
+
+fn apply_default_value(
+    mut commands: Commands,
+    mut text_edits: Query<(
+        Entity,
+        &TextEditDefaultValue,
+        &TextEditVariant,
+        &mut EditableText,
+        Option<&NumericRange>,
+    )>,
+) {
+    for (entity, default_value, variant, mut editable, range) in &mut text_edits {
+        if editable_text_string(&editable).is_empty() {
+            let text = if variant.is_numeric() {
+                let value = clamp_value(default_value.0.parse().unwrap_or(0.0), range);
+                format_numeric_value(value, *variant)
+            } else {
+                default_value.0.clone()
+            };
+            set_text_input_value(&mut editable, text);
+        }
+        commands.entity(entity).remove::<TextEditDefaultValue>();
+    }
+}
+
+fn sync_placeholder_visibility(
+    mut placeholder_nodes: Query<(&TextEditPlaceholderNode, &mut Node), Without<TextEditWrapper>>,
+    text_edits: Query<&EditableText>,
+) {
+    for (link, mut node) in &mut placeholder_nodes {
+        let Ok(editable) = text_edits.get(link.0) else {
+            continue;
+        };
+
+        let show = editable_text_string(editable).is_empty();
+        node.display = if show { Display::Flex } else { Display::None };
+    }
+}
+
+fn handle_suffix(
+    focus: Res<InputFocus>,
+    text_edits: Query<(Entity, &EditableText, &TextLayoutInfo, &ChildOf), With<TextEditSuffix>>,
+    mut suffix_nodes: Query<(&TextEditSuffixNode, &mut Node), Without<TextEditWrapper>>,
+    parents: Query<&ChildOf>,
+    configs: Query<&TextEditConfig>,
+) {
+    for (entity, editable, layout_info, child_of) in &text_edits {
+        let Some((_, mut node)) = suffix_nodes.iter_mut().find(|(link, _)| link.0 == entity) else {
+            continue;
+        };
+
+        let has_prefix = parents
+            .get(child_of.parent())
+            .ok()
+            .and_then(|wrapper_parent| configs.get(wrapper_parent.parent()).ok())
+            .is_some_and(|config| config.prefix.is_some());
+
+        let offset = WRAPPER_PADDING + if has_prefix { PREFIX_EXTRA } else { 0.0 };
+
+        let show = focus.get() != Some(entity) && !editable_text_string(editable).is_empty();
+        node.left = px(layout_info.size.x + offset);
+        node.display = if show { Display::Flex } else { Display::None };
+    }
+}
+
+fn handle_click_to_focus(
+    mut focus: ResMut<InputFocus>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    wrappers: Query<(&TextEditWrapper, &Hovered, &Children)>,
+    drag_hitboxes: Query<&DragHitbox>,
+    disabled_inputs: Query<(), (With<EditorTextEdit>, With<InteractionDisabled>)>,
+) {
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    for (wrapper, hovered, children) in &wrappers {
+        if disabled_inputs.contains(wrapper.0) {
+            continue;
+        }
+        let is_dragging = children
+            .iter()
+            .any(|c| drag_hitboxes.get(c).is_ok_and(|d| d.dragging));
+        if hovered.get() && !is_dragging {
+            focus.set(wrapper.0, FocusCause::Pressed);
+        }
+    }
+}
+
+fn handle_unfocus(
+    mut focus: ResMut<InputFocus>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    text_edits: Query<&ChildOf, With<EditorTextEdit>>,
+    wrappers: Query<&Hovered, With<TextEditWrapper>>,
+) {
+    let Some(focused_entity) = focus.get() else {
+        return;
+    };
+    let Ok(child_of) = text_edits.get(focused_entity) else {
+        return;
+    };
+    let Ok(hovered) = wrappers.get(child_of.parent()) else {
+        return;
+    };
+
+    let clicked_outside = mouse.get_just_pressed().next().is_some() && !hovered.get();
+    let key_dismiss = keyboard.just_pressed(KeyCode::Escape)
+        || keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter);
+
+    if clicked_outside || key_dismiss {
+        focus.clear();
+    }
+}
+
+fn handle_clamp_on_unfocus(
+    mut commands: Commands,
+    focus: Res<InputFocus>,
+    mut prev_focus: Local<Option<Entity>>,
+    mut text_edits: Query<
+        (
+            &TextEditVariant,
+            &mut EditableText,
+            Option<&TextEditSuffix>,
+            Option<&NumericRange>,
+            Option<&AllowEmpty>,
+        ),
+        With<EditorTextEdit>,
+    >,
+) {
+    let prev = *prev_focus;
+    *prev_focus = focus.get();
+
+    let Some(was_focused) = prev else { return };
+    if focus.get() == Some(was_focused) {
+        return;
+    }
+
+    let Ok((variant, mut editable, suffix, range, allow_empty)) = text_edits.get_mut(was_focused)
+    else {
+        return;
+    };
+
+    let text = strip_suffix(&editable_text_string(&editable), suffix);
+
+    commands.trigger(TextEditCommitEvent {
+        entity: was_focused,
+        text: text.clone(),
+    });
+
+    if !variant.is_numeric() {
+        return;
+    }
+
+    if text.is_empty() && allow_empty.is_some() {
+        return;
+    }
+
+    let value = text.parse().unwrap_or(0.0);
+    update_input_value(&mut editable, value, *variant, range);
+}
+
+fn handle_numeric_increment(
+    focus: Res<InputFocus>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut text_edits: Query<
+        (
+            &TextEditVariant,
+            &mut EditableText,
+            Option<&TextEditSuffix>,
+            Option<&NumericRange>,
+        ),
+        With<EditorTextEdit>,
+    >,
+) {
+    let Some(focused_entity) = focus.get() else {
+        return;
+    };
+    let Ok((variant, mut editable, suffix, range)) = text_edits.get_mut(focused_entity) else {
+        return;
+    };
+    if !variant.is_numeric() {
+        return;
+    }
+
+    let direction = match (
+        keyboard.just_pressed(KeyCode::ArrowUp),
+        keyboard.just_pressed(KeyCode::ArrowDown),
+    ) {
+        (true, _) => 1.0,
+        (_, true) => -1.0,
+        _ => return,
+    };
+
+    let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+    let step = if shift { 10.0 } else { 1.0 };
+    let new_value =
+        parse_numeric_value(&editable_text_string(&editable), suffix) + (direction * step);
+    let rounded = (new_value * 100.0).round() / 100.0;
+
+    update_input_value(&mut editable, rounded, *variant, range);
+}
+
+fn handle_drag_value(
+    mut commands: Commands,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut override_cursor: ResMut<OverrideCursor>,
+    mut drag_hitboxes: Query<(&mut DragHitbox, &Hovered, &ChildOf)>,
+    wrappers: Query<&TextEditWrapper>,
+    mut text_edits: Query<
+        (
+            &TextEditVariant,
+            &mut EditableText,
+            Option<&TextEditSuffix>,
+            Option<&NumericRange>,
+        ),
+        With<EditorTextEdit>,
+    >,
+) {
+    let Ok(window) = windows.single() else { return };
+    let cursor_pos = window.cursor_position();
+
+    for (mut hitbox, hovered, child_of) in &mut drag_hitboxes {
+        let Ok(wrapper) = wrappers.get(child_of.parent()) else {
+            continue;
+        };
+        let input_entity = wrapper.0;
+
+        if mouse.just_pressed(MouseButton::Left)
+            && hovered.get()
+            && let Some(pos) = cursor_pos
+        {
+            let Ok((_, editable, suffix, _)) = text_edits.get(input_entity) else {
+                continue;
+            };
+            hitbox.dragging = true;
+            hitbox.start_x = pos.x;
+            hitbox.start_value = parse_numeric_value(&editable_text_string(editable), suffix);
+            override_cursor.0 = Some(EntityCursor::System(
+                bevy::window::SystemCursorIcon::ColResize,
+            ));
+            commands.entity(child_of.parent()).insert(TextEditDragging);
+        }
+
+        if mouse.just_released(MouseButton::Left) {
+            if hitbox.dragging {
+                if let Ok((_, editable, suffix, _)) = text_edits.get(input_entity) {
+                    let text = strip_suffix(&editable_text_string(editable), suffix);
+                    commands.trigger(TextEditCommitEvent {
+                        entity: input_entity,
+                        text,
+                    });
+                }
+                let parent = child_of.parent();
+                commands.queue(move |world: &mut World| {
+                    if let Ok(mut ec) = world.get_entity_mut(parent) {
+                        ec.remove::<TextEditDragging>();
+                    }
+                });
+            }
+            hitbox.dragging = false;
+            if override_cursor.0
+                == Some(EntityCursor::System(
+                    bevy::window::SystemCursorIcon::ColResize,
+                ))
+            {
+                override_cursor.0 = None;
+            }
+        }
+
+        if hitbox.dragging
+            && let Some(pos) = cursor_pos
+        {
+            let Ok((variant, mut editable, _, range)) = text_edits.get_mut(input_entity) else {
+                continue;
+            };
+
+            let alt_mode = keyboard.pressed(KeyCode::SuperLeft)
+                || keyboard.pressed(KeyCode::SuperRight)
+                || keyboard.pressed(KeyCode::AltLeft)
+                || keyboard.pressed(KeyCode::AltRight);
+
+            let (amount, sensitivity) = match (*variant, alt_mode) {
+                (TextEditVariant::NumericI32, false) => (1.0, 5.0),
+                (TextEditVariant::NumericI32, true) => (10.0, 10.0),
+                (_, false) => (0.1, 5.0),
+                (_, true) => (1.0, 10.0),
+            };
+
+            let steps = ((pos.x - hitbox.start_x) / sensitivity).floor() as f64;
+            let new_value = hitbox.start_value + (steps * amount);
+            let rounded = (new_value * 100.0).round() / 100.0;
+
+            update_input_value(&mut editable, rounded, *variant, range);
+        }
+    }
+}
+
+fn strip_suffix(text: &str, suffix: Option<&TextEditSuffix>) -> String {
+    suffix
+        .and_then(|s| text.strip_suffix(&format!(" {}", s.0)))
+        .unwrap_or(text)
+        .to_string()
+}
+
+fn parse_numeric_value(text: &str, suffix: Option<&TextEditSuffix>) -> f64 {
+    strip_suffix(text, suffix).parse().unwrap_or(0.0)
+}
+
+pub fn format_numeric_value(value: f64, variant: TextEditVariant) -> String {
+    match variant {
+        // Round to integer; cast through `i64` so values that exceed
+        // the `i32` range (e.g. `u32` bitmasks like
+        // `CollisionLayers::filters` near `u32::MAX`) round-trip
+        // without saturation. The variant predates the wider
+        // `numeric_int()` builder; the name `NumericI32` now stands
+        // for "integer formatting", not the literal type.
+        TextEditVariant::NumericI32 => (value.round() as i64).to_string(),
+        TextEditVariant::NumericF32 => {
+            let rounded = (value * 100.0).round() / 100.0;
+            format!("{rounded:.2}")
+        }
+        TextEditVariant::Default => value.to_string(),
+    }
+}
+
+fn clamp_value(value: f64, range: Option<&NumericRange>) -> f64 {
+    match range {
+        Some(r) => value.clamp(r.min, r.max),
+        None => value,
+    }
+}
+
+fn update_input_value(
+    editable: &mut EditableText,
+    value: f64,
+    variant: TextEditVariant,
+    range: Option<&NumericRange>,
+) {
+    let clamped = clamp_value(value, range);
+    set_text_input_value(editable, format_numeric_value(clamped, variant));
+}
+
+fn sync_text_edit_values(
+    mut configs: Query<(&TextEditConfig, &Children, &mut TextEditValue)>,
+    wrappers: Query<&TextEditWrapper>,
+    editables: Query<&EditableText, With<EditorTextEdit>>,
+) {
+    for (config, children, mut value) in &mut configs {
+        if !config.initialized {
+            continue;
+        }
+        for child in children.iter() {
+            let Ok(wrapper) = wrappers.get(child) else {
+                continue;
+            };
+            let Ok(editable) = editables.get(wrapper.0) else {
+                continue;
+            };
+            let text = editable_text_string(editable);
+            if value.0 != text {
+                value.0 = text;
+            }
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Integer-typed reflect fields (e.g. `u32` bitmasks like
+    /// `CollisionLayers::filters`) flow through `format_numeric_value`
+    /// when the inspector refreshes their inputs from ECS state. The
+    /// `NumericI32` variant must format without a decimal *and*
+    /// preserve values that exceed the `i32` range (`u32::MAX` and
+    /// any `u32` with the high bit set).
+    #[test]
+    fn integer_variant_formats_without_decimal() {
+        assert_eq!(format_numeric_value(0.0, TextEditVariant::NumericI32), "0");
+        assert_eq!(
+            format_numeric_value(255.0, TextEditVariant::NumericI32),
+            "255",
+        );
+        assert_eq!(
+            format_numeric_value(-7.0, TextEditVariant::NumericI32),
+            "-7",
+        );
+    }
+
+    /// `u32::MAX` (`4294967295`) survives the round-trip through
+    /// `f64`. The previous implementation cast through `i32` and
+    /// saturated to `2147483647`, which corrupted the visible value
+    /// of any full-bitmask `CollisionLayers::filters`.
+    #[test]
+    fn integer_variant_preserves_full_u32_range() {
+        let u32_max = u32::MAX as f64;
+        assert_eq!(
+            format_numeric_value(u32_max, TextEditVariant::NumericI32),
+            "4294967295",
+        );
+
+        // High-bit-set u32 (above i32::MAX) used to round-trip to a
+        // negative i32; check the most-significant bit alone.
+        let high_bit = (1u32 << 31) as f64;
+        assert_eq!(
+            format_numeric_value(high_bit, TextEditVariant::NumericI32),
+            "2147483648",
+        );
+    }
+
+    /// Float variant keeps two decimals (drag-input UX).
+    #[test]
+    fn float_variant_keeps_two_decimals() {
+        assert_eq!(
+            format_numeric_value(1.234, TextEditVariant::NumericF32),
+            "1.23",
+        );
+        assert_eq!(
+            format_numeric_value(0.0, TextEditVariant::NumericF32),
+            "0.00",
+        );
+    }
+}

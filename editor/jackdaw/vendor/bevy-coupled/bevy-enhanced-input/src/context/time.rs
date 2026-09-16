@@ -1,0 +1,53 @@
+use core::time::Duration;
+
+use bevy::{ecs::system::SystemParam, prelude::*};
+
+/// Time resources used for input conditions and modifier evaluation.
+///
+/// Dereferences to [`Self::auto`], which is the default time resource
+/// based on the current schedule. But you can optionally use [`Self::real`]
+/// if you want the time to be unaffected by time dilation.
+#[derive(SystemParam, Deref)]
+pub struct ContextTime<'w> {
+    #[deref]
+    pub auto: Res<'w, Time>,
+    #[deprecated(since = "0.25.0", note = "Renamed into `auto`")]
+    pub virt: Res<'w, Time>,
+    pub real: Res<'w, Time<Real>>,
+}
+
+impl ContextTime<'_> {
+    /// Returns the delta of the time resource corresponding to the given [`TimeKind`].
+    #[must_use]
+    pub fn delta_kind(&self, kind: TimeKind) -> Duration {
+        match kind {
+            TimeKind::Auto | TimeKind::Virtual => self.auto.delta(),
+            TimeKind::Real => self.real.delta(),
+        }
+    }
+}
+
+/// Type of the [`Time`] resource to use.
+///
+/// Used to configure time-based [modifiers](crate::modifier) and [conditions](crate::condition).
+#[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(feature = "reflect", derive(Reflect), reflect(Clone, Debug, Default))]
+pub enum TimeKind {
+    /// Corresponds to [`Time<Real>`].
+    ///
+    /// Real wall-clock time elapsed, not affected by pausing or scaling.
+    ///
+    /// This is the default value.
+    #[default]
+    Real,
+    /// Corresponds to [`Time`], which contains [`Time<Virtual>`], except in the fixed schedule,
+    /// where it's [`Time<Fixed>`].
+    ///
+    /// Virtual game time, affected by [`Time::pause`] and [`Time::relative_speed`].
+    ///
+    /// Useful for time-based actions that needs to be paused or speedup together with the game.
+    Auto,
+    /// A deprecated alias for [`Self::Auto`].
+    #[deprecated(since = "0.25.0", note = "Renamed into `Auto`")]
+    Virtual,
+}

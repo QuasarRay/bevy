@@ -1,0 +1,23 @@
+# Active workspace cargo config. For local-build alternatives see
+# `.cargo/config_fast_builds.toml` (Mold/LLD speed-ups) and
+# `.cargo/config_ci.toml` (cranelift backend for CI).
+#
+# This file targets correctness on Windows: the MSVC linker has a
+# hard 65,535 PE export cap, which `jackdaw_sdk`'s aggregate of
+# `bevy + jackdaw_api` exceeds. `rust-lld` does not share that cap,
+# so we route Windows builds through it. Linux and macOS use their
+# default linker (or the user's override in a different config).
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+[build]
+# The default `dylib` feature links the editor against the SDK dylib.
+# Incremental codegen and dylib linking do not mix: incremental reuse
+# leaves references to hidden anon constants inside the SDK dylib and
+# the link fails with undefined hidden symbols. Off for every build so
+# the default `dylib` feature links without a per-command env var.
+incremental = false
+
+[alias]
+xtask = "run --quiet --package xtask --manifest-path xtask/Cargo.toml --"

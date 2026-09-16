@@ -1,0 +1,51 @@
+## Bevy Notify
+
+A reactive(ish) system for the bevy game engine using relationships.
+
+Monitor are entities that watch for changes, additions, and removals of specified components with `NotifyChanged<Component>`, `NotifyAdded<Component>`, and `NotifyRemoved<Component>`. By default monitors watch for changes on all entities, but this can be restricted via, [`Monitor`], and [`MonitorSelf`].
+
+```rust
+use bevy_monitors::prelude::*;
+use bevy::{prelude::*, ui_widgets::observe};
+
+#[derive(Component)]
+pub struct Health(pub u8);
+
+let player = commands
+    .spawn((
+        Name::new("Player"),
+        Health(100),
+        MonitorSelf,
+        observe(|mutation: On<Mutation<Health>>, health: Query<&Health>| -> Result<(), BevyError> {
+            let current_health = health.get(mutation.entity)?;
+
+            println!("My current health is {}", current_health);
+        })
+    ))
+    .id();
+
+commands.spawn((
+    Name::new("Doctor"),
+    Monitor(player),
+    NotifyChanged::<Health>::default(),
+    observe(
+        |mutation: On<Mutation<Health>>,
+        mut health: Query<&mut Health>|
+        -> Result<(), BevyError> {
+            let mut health = health.get_mut(mutation.mutated)?;
+
+            if health.0 <= 20 {
+                health.0 += 20;
+            }
+
+            Ok(())
+         }
+     ),
+));
+```
+
+## Future Work
+
+Use many to many relationships once we have them so that multiple entities can be watched at once. For now the same effect can be achieved by using a custom relationship.
+
+Also look into using `ComponentId` on the observer trigger to do fancy stuff like `On<Mutation, Component>`.
